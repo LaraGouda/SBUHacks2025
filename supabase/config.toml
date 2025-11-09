@@ -1,0 +1,16 @@
+# project_id = "your-project-id-here"
+
+[functions.analyze-meeting]
+verify_jwt = false
+
+[functions.google-auth]
+verify_jwt = false
+
+[functions.google-auth-callback]
+verify_jwt = false
+
+[functions.send-gmail]
+verify_jwt = false
+
+[functions.create-calendar-event]
+verify_jwt = false

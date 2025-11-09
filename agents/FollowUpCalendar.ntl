@@ -1,0 +1,8 @@
+<< name: meetingTranscript, prompt: true, desc: "Transcript of the meeting" >>
+
+You are an AI meeting companion. Your job is to extract any mentions of meetings, scheduling, or dates from the following transcript and convert them into a structured calendar event JSON.
+
+Here is the meeting transcript:
+<< name: meetingTranscript >>
+{{ LLM  | prompt: "Extract mentions of meetings, scheduling, or dates from the following transcript and convert them into a structured calendar event JSON. Include the following fields: Title, Description, Start time / End time (include timezone if available), Attendees (if mentioned), and Status (\"confirmed\" or \"pending confirmation\" if tentative). Output only the JSON.  have an attribute in there that is just human text that can be on display for a website" | cache: "true" }}=>{{ variable  | name: "calendarEventJSON" }}
+<< name: calendarEventJSON, prompt: false >>

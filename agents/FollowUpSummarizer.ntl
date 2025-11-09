@@ -1,0 +1,18 @@
+<< name: meetingTranscript, prompt: true, desc: "Meeting transcript (text or file)" >>
+<< name: << name: meetingSummary, prompt: false >>meetingAnalysis, prompt: false >>
+{{ LLM  | prompt: "You are an AI meeting summarizer. Your job is to create a concise executive summary from the provided meeting transcript.
+
+Focus only on actual information discussed — no assumptions.
+
+Give a 4-5 sentence summary. Then:
+
+Highlight decisions, goals, and outcomes in bullet format.
+For each bullet, cite the exact line(s) from the transcript that support it using this format:
+“Summary Item: … (ref: [timestamp/participant])”.
+Avoid generic language or speculation.
+Make it not too long
+
+output as meeting_summary a json file, have an attribute in there that is just human text that can be on display for a website" | cache: "true" | modelCard: "ns-GPT4o-mini" }}=>{{ variable  | name: "meetingSummary" }}
+{
+  "meetingSummary": << name: meetingSummary, prompt: false >>,
+}
