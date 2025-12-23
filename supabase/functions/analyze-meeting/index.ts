@@ -77,9 +77,6 @@ serve(async (req) => {
     }
 
     const neuralseekApiKey = Deno.env.get('NEURALSEEK_API_KEY');
-    const neuralseekBaseUrl = Deno.env.get('NEURALSEEK_BASE_URL') || 'https://stagingapi.neuralseek.com';
-    const neuralseekWorkspace = Deno.env.get('NEURALSEEK_WORKSPACE') || 'stony52';
-    
     if (!neuralseekApiKey) {
       console.error('NEURALSEEK_API_KEY not configured');
       return new Response(
@@ -95,7 +92,7 @@ serve(async (req) => {
 
     // Call BigAgent to get comprehensive analysis
     const bigAgentResponse = await fetch(
-      `${neuralseekBaseUrl}/v1/${neuralseekWorkspace}/maistro`,
+      'https://stagingapi.neuralseek.com/v1/stony52/maistro',
       {
         method: 'POST',
         headers: {
@@ -202,29 +199,28 @@ serve(async (req) => {
     if (!summary || nextTasks.length === 0) {
       console.log('Calling individual NeuralSeek agents...');
       
-      const neuralseekApiUrl = `${neuralseekBaseUrl}/v1/${neuralseekWorkspace}/maistro`;
       const [summaryRes, tasksRes, emailRes, calendarRes, blockersRes] = await Promise.all([
-        fetch(neuralseekApiUrl, {
+        fetch('https://stagingapi.neuralseek.com/v1/stony52/maistro', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${neuralseekApiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ agent: 'FollowUpSummarizer', params: { meetingTranscript: transcript } }),
         }),
-        fetch(neuralseekApiUrl, {
+        fetch('https://stagingapi.neuralseek.com/v1/stony52/maistro', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${neuralseekApiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ agent: 'FollowUpNextTasks', params: { meetingTranscript: transcript } }),
         }),
-        fetch(neuralseekApiUrl, {
+        fetch('https://stagingapi.neuralseek.com/v1/stony52/maistro', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${neuralseekApiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ agent: 'FollowUpEmail', params: { meetingTranscript: transcript } }),
         }),
-        fetch(neuralseekApiUrl, {
+        fetch('https://stagingapi.neuralseek.com/v1/stony52/maistro', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${neuralseekApiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ agent: 'FollowUpCalendar', params: { meetingTranscript: transcript } }),
         }),
-        fetch(neuralseekApiUrl, {
+        fetch('https://stagingapi.neuralseek.com/v1/stony52/maistro', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${neuralseekApiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ agent: 'FollowUpBlockers', params: { meetingTranscript: transcript } }),

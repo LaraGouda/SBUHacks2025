@@ -8,7 +8,7 @@ const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
   console.error('Missing Supabase environment variables. Please check your .env file.');
   console.error('Required variables:');
-  console.error('  - VITE_SUPABASE_URL (your Supabase project URL)');
+  console.error('  - VITE_SUPABASE_URL (should be: https://eyfrwfhkenuwrkccmqle.supabase.co)');
   console.error('  - VITE_SUPABASE_PUBLISHABLE_KEY (your anon/public key from Supabase dashboard)');
   console.error('See CHECK_SUPABASE_CONFIG.md for setup instructions.');
 }

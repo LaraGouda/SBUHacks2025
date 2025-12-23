@@ -354,47 +354,58 @@ export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
       const recipients = emailData.recipients || [];
       const recipient = recipients.length > 0 ? recipients[0] : 'recipient@example.com';
 
-      console.log('Sending email with:', { recipient, subject: emailSubject, bodyLength: emailBody.length });
-      
-      const { data, error } = await supabase.functions.invoke('send-gmail', {
-        body: {
+      console.log('Sending email with:', { recipients, subject: emailSubject, bodyLength: emailBody.length });
+
+      // Use direct fetch to the Supabase Functions endpoint so we can
+      // inspect raw status and body. This avoids generic client-side
+      // error messages and allows us to include all recipients.
+      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+      const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+      const functionsUrl = `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/send-gmail`;
+
+      const resp = await fetch(functionsUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_PUBLISHABLE_KEY || '',
+        },
+        body: JSON.stringify({
           accessToken: tokenToUse,
-          to: recipient,
+          // include all recipients so draft has CCs if present
+          to: Array.isArray(recipients) ? recipients.join(', ') : recipient,
           subject: emailSubject,
           body: emailBody,
-        }
+        }),
       });
 
-      console.log('Email response:', { data, error });
-
-      if (error) {
-        console.error('Supabase function error:', error);
-        // Supabase edge function errors can have different structures
-        let errorMessage = 'Failed to send email';
-        
-        // Try to extract error message from different possible structures
-        if (error.message) {
-          errorMessage = error.message;
-        } else if (error.error) {
-          errorMessage = typeof error.error === 'string' ? error.error : JSON.stringify(error.error);
-        } else if (typeof error === 'string') {
-          errorMessage = error;
-        } else if (error.context?.message) {
-          errorMessage = error.context.message;
-        }
-        
-        throw new Error(errorMessage);
+      let respBody: any = null;
+      try {
+        respBody = await resp.json();
+      } catch (err) {
+        respBody = { raw: await resp.text() };
       }
 
-      // Check if data contains an error (function returned 200 but with error in body)
-      if (data?.error) {
-        console.error('Function returned error:', data.error);
-        const errorMsg = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
-        throw new Error(errorMsg);
+      console.log('send-gmail response status:', resp.status, respBody);
+
+      if (!resp.ok) {
+        const message = respBody?.error || respBody?.message || `Edge function returned status ${resp.status}`;
+        throw new Error(typeof message === 'string' ? message : JSON.stringify(message));
       }
 
-      if (!data) {
-        throw new Error('No response from edge function. Please check if send-gmail is deployed.');
+      // Success - open Gmail compose in a new tab with the same params
+      try {
+        const mailParams = new URLSearchParams();
+        mailParams.set('view', 'cm');
+        mailParams.set('fs', '1');
+        mailParams.set('to', Array.isArray(recipients) ? recipients.join(',') : recipient);
+        mailParams.set('su', emailSubject);
+        mailParams.set('body', emailBody);
+
+        const composeUrl = `https://mail.google.com/mail/?${mailParams.toString()}`;
+        window.open(composeUrl, '_blank');
+      } catch (err) {
+        console.warn('Unable to open compose tab:', err);
       }
 
       toast({
@@ -404,11 +415,23 @@ export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
     } catch (error: any) {
       console.error('Error saving email draft:', error);
       setEmailApproved(false);
-      toast({
-        title: "Failed to Save",
-        description: error.message || "Could not save email draft. Please try again.",
-        variant: "destructive",
-      });
+
+      const msg = (error?.message || String(error || '')).toLowerCase();
+
+      // If Gmail permission scope is missing, give a clear actionable message
+      if (msg.includes('gmail.compose') || msg.includes('permission') || msg.includes('insufficient')) {
+        toast({
+          title: "Failed to Save",
+          description: "Permission denied. Please ensure your Google account has the required Gmail scopes (e.g. gmail.compose) and reconnect your account.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Failed to Save",
+          description: error.message || "Could not save email draft. Please try again.",
+          variant: "destructive",
+        });
+      }
     } finally {
       setEmailSending(false);
     }
@@ -531,31 +554,30 @@ export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
       color: "text-primary",
       type: "email",
     },
-    // Temporarily hidden cards
-    // {
-    //   title: "Next Tasks",
-    //   description: "Action items and assignments",
-    //   icon: CheckSquare,
-    //   content: parsedResults.nextTasks,
-    //   color: "text-accent",
-    //   type: "tasks",
-    // },
-    // {
-    //   title: "Calendar Events",
-    //   description: "Scheduled meetings and deadlines",
-    //   icon: Calendar,
-    //   content: parsedResults.calendar,
-    //   color: "text-accent",
-    //   type: "calendar",
-    // },
-    // {
-    //   title: "Blockers & Issues",
-    //   description: "Identified obstacles",
-    //   icon: AlertCircle,
-    //   content: parsedResults.blockers,
-    //   color: "text-destructive",
-    //   type: "blockers",
-    // },
+    {
+      title: "Next Tasks",
+      description: "Action items and assignments",
+      icon: CheckSquare,
+      content: parsedResults.nextTasks,
+      color: "text-accent",
+      type: "tasks",
+    },
+    {
+      title: "Calendar Events",
+      description: "Scheduled meetings and deadlines",
+      icon: Calendar,
+      content: parsedResults.calendar,
+      color: "text-accent",
+      type: "calendar",
+    },
+    {
+      title: "Blockers & Issues",
+      description: "Identified obstacles",
+      icon: AlertCircle,
+      content: parsedResults.blockers,
+      color: "text-destructive",
+      type: "blockers",
+    },
   ];
 
   return (
@@ -588,7 +610,7 @@ export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
         )}
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2 max-w-4xl mx-auto">
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 max-w-6xl mx-auto">
         {sections.map((section, index) => {
           const Icon = section.icon;
           const isArray = Array.isArray(section.content);

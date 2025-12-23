@@ -7,19 +7,34 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
+# Dependencies
+node_modules/
 
-# Editor directories and files
+# Build output
+dist/
+dist-ssr/
+build/
+
+# Vite cache
+.vite/
+
+# Local env files (never commit)
+.env
+.env.*
+!.env.example
+
+# Supabase local/temp
+supabase/.temp/
+supabase/.branches/
+.supabase/
+
+# OS / Editor
+.DS_Store
+__MACOSX/
 .vscode/*
 !.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-.env
+.idea/
+
+# Misc
+*.local
+coverage/

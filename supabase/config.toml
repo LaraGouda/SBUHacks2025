@@ -1,4 +1,4 @@
-# project_id = "your-project-id-here"
+project_id = "eyfrwfhkenuwrkccmqle"
 
 [functions.analyze-meeting]
 verify_jwt = false

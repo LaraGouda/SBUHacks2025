@@ -216,6 +216,16 @@ export const GoogleAuthProvider = ({ children }: { children: React.ReactNode }) 
         provider: 'google',
         options: {
           redirectTo: redirectUrl,
+          // Request Gmail compose/send scopes so drafts can be created
+          // Also request openid/email/profile to ensure identity info is available
+          scopes: [
+            'openid',
+            'email',
+            'profile',
+            'https://www.googleapis.com/auth/gmail.compose',
+            'https://www.googleapis.com/auth/gmail.insert',
+            'https://www.googleapis.com/auth/gmail.send'
+          ].join(' '),
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',

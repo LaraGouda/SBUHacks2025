@@ -27,23 +27,19 @@ echo ""
 echo "2. Checking Supabase config..."
 if [ -f supabase/config.toml ]; then
   PROJECT_ID=$(grep "project_id" supabase/config.toml | cut -d'"' -f2)
-  if [ -n "$PROJECT_ID" ] && [ "$PROJECT_ID" != "your-project-id-here" ]; then
-    echo "Project ID in config.toml: $PROJECT_ID"
-    echo "✓ Project ID is set"
+  echo "Project ID in config.toml: $PROJECT_ID"
+  if [ "$PROJECT_ID" = "mwlrmsrndiaqytkflxny" ]; then
+    echo "✓ Project ID is correct"
   else
-    echo "⚠ Project ID not set in config.toml"
+    echo "✗ Project ID is wrong (should be: mwlrmsrndiaqytkflxny)"
   fi
 fi
 echo ""
 echo "3. Next steps:"
 echo "   - Make sure .env has your actual Supabase anon key"
-echo "   - Set project_id in supabase/config.toml"
 echo "   - Verify Supabase Edge Function Secrets are set:"
 echo "     * GOOGLE_CLIENT_ID"
 echo "     * GOOGLE_CLIENT_SECRET"
 echo "     * PROJECT_URL (optional)"
-echo "     * NEURALSEEK_API_KEY"
-echo "     * NEURALSEEK_BASE_URL (optional, defaults to stagingapi.neuralseek.com)"
-echo "     * NEURALSEEK_WORKSPACE (optional, defaults to stony52)"
-echo "   - Verify Google Cloud Console redirect URI matches your project:"
-echo "     https://[YOUR-PROJECT-REF].supabase.co/functions/v1/google-auth-callback"
+echo "   - Verify Google Cloud Console redirect URI:"
+echo "     https://mwlrmsrndiaqytkflxny.supabase.co/functions/v1/google-auth-callback"
