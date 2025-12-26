@@ -6,14 +6,23 @@
 // Type definitions for each card type
 export interface TaskItem {
   task: string;
+  owner?: string | null;
   rationale?: string;
   priority?: string;
+  references?: string[];
 }
 
 export interface BlockerItem {
+  type?: string;
+  title?: string;
   description: string;
   quote?: string;
   timestamp?: string;
+  severity?: string;
+  impact?: string | null;
+  references?: string[];
+  evidenceQuotes?: string[];
+  missingInfo?: string[];
 }
 
 export interface CalendarEvent {
@@ -24,6 +33,8 @@ export interface CalendarEvent {
   timezone?: string;
   attendees?: string[];
   status?: string;
+  references?: string[];
+  missingInfo?: string[];
 }
 
 export interface EmailData {
@@ -31,13 +42,18 @@ export interface EmailData {
   recipients?: string[];
   subject?: string;
   body: string;
-  references?: Array<{ speaker: string; text: string; timestamp: string }>;
+  references?: string[];
+}
+
+export interface SummaryData {
+  text: string;
+  bullets: string[];
 }
 
 export interface AnalysisResults {
-  summary: string;
+  summary: SummaryData;
   nextTasks: TaskItem[];
-  email: EmailData;
+  email: EmailData[];
   calendar: CalendarEvent[];
   blockers: BlockerItem[];
 }
@@ -62,16 +78,107 @@ const stripMarkdown = (str: string): string => {
     .trim();
 };
 
+const extractJsonSubstring = (value: string): string | null => {
+  const match = value.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+  return match ? match[0] : null;
+};
+
+const normalizeJson = (value: string): string => {
+  return value.replace(/,\s*([}\]])/g, '$1');
+};
+
+const repairJson = (value: string): string => {
+  const stack: string[] = [];
+  let inString = false;
+  let escaping = false;
+
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i];
+    if (escaping) {
+      escaping = false;
+      continue;
+    }
+
+    if (char === '\\') {
+      if (inString) escaping = true;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) continue;
+
+    if (char === '{' || char === '[') {
+      stack.push(char);
+    } else if (char === '}' || char === ']') {
+      const expected = char === '}' ? '{' : '[';
+      if (stack.length > 0 && stack[stack.length - 1] === expected) {
+        stack.pop();
+      }
+    }
+  }
+
+  if (stack.length === 0) return value;
+
+  let repaired = value;
+  for (let i = stack.length - 1; i >= 0; i--) {
+    repaired += stack[i] === '{' ? '}' : ']';
+  }
+  return repaired;
+};
+
+const tryParseJson = (value: string): any | null => {
+  const trimmed = stripMarkdown(value);
+  const candidate = (trimmed.startsWith('{') || trimmed.startsWith('['))
+    ? trimmed
+    : extractJsonSubstring(trimmed);
+
+  if (!candidate) return null;
+
+  const normalized = normalizeJson(candidate);
+  try {
+    return JSON.parse(normalized);
+  } catch {
+    try {
+      return JSON.parse(repairJson(normalized));
+    } catch {
+      return null;
+    }
+  }
+};
+
+const tryParseJsonFromArray = (value: any): any | null => {
+  if (!Array.isArray(value)) return null;
+  if (!value.every(item => typeof item === 'string')) return null;
+  const joined = value.join('\n').trim();
+  if (!joined) return null;
+  if (!joined.includes('{') && !joined.includes('[')) return null;
+  return tryParseJson(joined);
+};
+
 /**
  * Parses a JSON string to extract readable text for summary
  */
-const parseSummary = (value: any): string => {
-  if (!value) return "No summary generated";
+const parseSummary = (value: any): SummaryData => {
+  if (!value) return { text: "No summary generated", bullets: [] };
   
   // If it's an object, check for display_text first
   if (typeof value === 'object' && value !== null) {
+    const parsedFromArray = tryParseJsonFromArray(value);
+    if (parsedFromArray) {
+      return parseSummary(parsedFromArray);
+    }
+    if (value.summary && Array.isArray(value.bullets)) {
+      return {
+        text: typeof value.summary === 'string' ? value.summary : String(value.summary || ''),
+        bullets: value.bullets.filter((item: any) => typeof item === 'string' && item.trim()),
+      };
+    }
     if (value.display_text || value.displayText) {
-      return value.display_text || value.displayText;
+      return { text: value.display_text || value.displayText, bullets: [] };
     }
     
     // Check nested structures
@@ -93,11 +200,12 @@ const parseSummary = (value: any): string => {
       } else if (typeof value.meetingSummary === 'object') {
         const summaryObj = value.meetingSummary;
         if (summaryObj.display_text || summaryObj.displayText) {
-          return summaryObj.display_text || summaryObj.displayText;
+          return { text: summaryObj.display_text || summaryObj.displayText, bullets: [] };
         }
         if (summaryObj.meeting_summary) {
           const innerSummary = summaryObj.meeting_summary;
           let summaryText = innerSummary.summary || innerSummary.text || '';
+          const bullets: string[] = [];
           
           // Include decisions if present
           if (innerSummary.decisions_goals_outcomes && Array.isArray(innerSummary.decisions_goals_outcomes)) {
@@ -110,43 +218,38 @@ const parseSummary = (value: any): string => {
                 return item;
               })
               .filter(Boolean)
-              .join('\n');
-            if (decisions) {
-              summaryText += '\n\n' + decisions;
+              .filter((item: any) => typeof item === 'string' && item.trim());
+            if (decisions.length > 0) {
+              bullets.push(...decisions);
             }
           }
           
-          return summaryText || String(value);
+          return { text: summaryText || String(value), bullets };
         }
       }
     }
     
-    if (value.summary) return value.summary;
-    if (value.text) return value.text;
+    if (value.summary) {
+      if (typeof value.summary === 'object' && value.summary !== null) {
+        return parseSummary(value.summary);
+      }
+      return { text: value.summary, bullets: [] };
+    }
+    if (value.text) return { text: value.text, bullets: [] };
   }
   
   if (typeof value === 'string') {
     let trimmed = value.trim();
     
-    // Strip markdown code blocks first
-    if (trimmed.includes('```')) {
-      trimmed = stripMarkdown(trimmed);
+    const parsedJson = tryParseJson(trimmed);
+    if (parsedJson) {
+      return parseSummary(parsedJson);
     }
     
-    // If it looks like JSON, try to parse it
-    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        return parseSummary(parsed);
-      } catch {
-        // If parsing fails, return as-is
-      }
-    }
-    
-    return trimmed;
+    return { text: trimmed, bullets: [] };
   }
   
-  return String(value);
+  return { text: String(value), bullets: [] };
 };
 
 /**
@@ -155,6 +258,11 @@ const parseSummary = (value: any): string => {
 const parseTasks = (value: any): TaskItem[] => {
   if (!value) return [];
   
+  const parsedFromArray = tryParseJsonFromArray(value);
+  if (parsedFromArray) {
+    return parseTasks(parsedFromArray);
+  }
+
   // If value has display_text but we need structured data, parse the nested JSON
   if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
     // Check if it has a nested structure like { next_steps: [...], display_text: "..." }
@@ -163,22 +271,19 @@ const parseTasks = (value: any): TaskItem[] => {
       if (Array.isArray(steps)) {
         return steps.map((item: any) => ({
           task: item.task || item.item || item.description || '',
+          owner: item.owner ?? item.assignee ?? null,
           rationale: item.rationale,
           priority: item.priority,
+          references: Array.isArray(item.references) ? item.references : undefined,
         })).filter(item => item.task && item.task.trim());
       }
     }
     
     // If it's a string with markdown code blocks, parse it
-    if (typeof value === 'string' && value.includes('```')) {
-      const trimmed = stripMarkdown(value);
-      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-        try {
-          const parsed = JSON.parse(trimmed);
-          return parseTasks(parsed);
-        } catch {
-          // Continue to other parsing methods
-        }
+    if (typeof value === 'string') {
+      const parsedJson = tryParseJson(value);
+      if (parsedJson) {
+        return parseTasks(parsedJson);
       }
     }
   }
@@ -187,8 +292,10 @@ const parseTasks = (value: any): TaskItem[] => {
   if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'object' && value[0].task) {
     return value.map(item => ({
       task: item.task || '',
+      owner: item.owner ?? item.assignee ?? null,
       rationale: item.rationale,
       priority: item.priority,
+      references: Array.isArray(item.references) ? item.references : undefined,
     }));
   }
   
@@ -196,34 +303,9 @@ const parseTasks = (value: any): TaskItem[] => {
   if (typeof value === 'string') {
     let valueStr = value.trim();
     
-    // Strip markdown if present
-    if (valueStr.includes('```')) {
-      valueStr = stripMarkdown(valueStr);
-    }
-    
-    // If it looks like JSON, parse it
-    if (valueStr.startsWith('[') || valueStr.startsWith('{')) {
-      try {
-        const parsed = JSON.parse(valueStr);
-        // Check if parsed has next_steps array
-        if (parsed.next_steps || parsed.nextSteps) {
-          const steps = parsed.next_steps || parsed.nextSteps;
-          if (Array.isArray(steps)) {
-            return steps.map((item: any) => ({
-              task: item.task || item.item || item.description || '',
-              rationale: item.rationale,
-              priority: item.priority,
-            })).filter(item => item.task && item.task.trim());
-          }
-        }
-        // If it's directly an array, parse it
-        if (Array.isArray(parsed)) {
-          return parseTasks(parsed);
-        }
-        return parseTasks(parsed);
-      } catch {
-        // If parsing fails, try to extract from string
-      }
+    const parsedJson = tryParseJson(valueStr);
+    if (parsedJson) {
+      return parseTasks(parsedJson);
     }
   }
   
@@ -244,8 +326,10 @@ const parseTasks = (value: any): TaskItem[] => {
             const parsed = JSON.parse(itemStr);
             return {
               task: parsed.task || parsed.item || parsed.description || '',
+              owner: parsed.owner ?? parsed.assignee ?? null,
               rationale: parsed.rationale,
               priority: parsed.priority,
+              references: Array.isArray(parsed.references) ? parsed.references : undefined,
             };
           } catch {
             // If parsing fails, try regex extraction
@@ -268,8 +352,10 @@ const parseTasks = (value: any): TaskItem[] => {
       if (typeof item === 'object' && item !== null) {
         return {
           task: item.task || item.item || item.description || '',
+          owner: item.owner ?? item.assignee ?? null,
           rationale: item.rationale,
           priority: item.priority,
+          references: Array.isArray(item.references) ? item.references : undefined,
         };
       }
       
@@ -286,22 +372,34 @@ const parseTasks = (value: any): TaskItem[] => {
 const parseBlockers = (value: any): BlockerItem[] => {
   if (!value) return [];
   
+  const parsedFromArray = tryParseJsonFromArray(value);
+  if (parsedFromArray) {
+    return parseBlockers(parsedFromArray);
+  }
+
   // If value is a string with human-readable text at the end, extract blockers from structured data
   if (typeof value === 'string') {
-    // Check if it contains structured JSON before the human-readable text
-    const jsonMatch = value.match(/```json\s*([\s\S]*?)```/);
-    if (jsonMatch) {
-      try {
-        const parsed = JSON.parse(stripMarkdown(jsonMatch[1]));
-        return parseBlockers(parsed);
-      } catch {
-        // Continue to other parsing methods
-      }
+    const parsedJson = tryParseJson(value);
+    if (parsedJson) {
+      return parseBlockers(parsedJson);
     }
   }
   
   // If it's an object with nested structures
   if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    if (value.items && Array.isArray(value.items)) {
+      return value.items.map((item: any) => ({
+        type: item.type,
+        title: item.title,
+        description: item.description || '',
+        severity: item.severity,
+        impact: item.impact ?? null,
+        references: Array.isArray(item.references) ? item.references : undefined,
+        evidenceQuotes: Array.isArray(item.evidence_quotes) ? item.evidence_quotes : undefined,
+        missingInfo: Array.isArray(item.missing_info_to_resolve) ? item.missing_info_to_resolve : undefined,
+      })).filter(item => item.description && item.description.trim());
+    }
+
     // Check for open_questions, uncertainties, risks, blockers arrays
     const allBlockers: BlockerItem[] = [];
     
@@ -310,6 +408,9 @@ const parseBlockers = (value: any): BlockerItem[] => {
         description: item.description || '',
         quote: item.quote,
         timestamp: item.timestamp,
+        severity: item.severity,
+        impact: item.impact,
+        references: Array.isArray(item.references) ? item.references : undefined,
       })));
     }
     
@@ -318,6 +419,9 @@ const parseBlockers = (value: any): BlockerItem[] => {
         description: item.description || '',
         quote: item.quote,
         timestamp: item.timestamp,
+        severity: item.severity,
+        impact: item.impact,
+        references: Array.isArray(item.references) ? item.references : undefined,
       })));
     }
     
@@ -326,6 +430,9 @@ const parseBlockers = (value: any): BlockerItem[] => {
         description: item.description || '',
         quote: item.quote,
         timestamp: item.timestamp,
+        severity: item.severity,
+        impact: item.impact,
+        references: Array.isArray(item.references) ? item.references : undefined,
       })));
     }
     
@@ -334,6 +441,9 @@ const parseBlockers = (value: any): BlockerItem[] => {
         description: item.description || '',
         quote: item.quote,
         timestamp: item.timestamp,
+        severity: item.severity,
+        impact: item.impact,
+        references: Array.isArray(item.references) ? item.references : undefined,
       })));
     }
     
@@ -345,9 +455,16 @@ const parseBlockers = (value: any): BlockerItem[] => {
   // If it's already an array of BlockerItem objects, return as-is
   if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'object' && value[0].description) {
     return value.map(item => ({
+      type: item.type,
+      title: item.title,
       description: item.description || '',
       quote: item.quote,
       timestamp: item.timestamp,
+      severity: item.severity,
+      impact: item.impact,
+      references: Array.isArray(item.references) ? item.references : undefined,
+      evidenceQuotes: Array.isArray(item.evidence_quotes) ? item.evidence_quotes : undefined,
+      missingInfo: Array.isArray(item.missing_info_to_resolve) ? item.missing_info_to_resolve : undefined,
     }));
   }
   
@@ -355,19 +472,9 @@ const parseBlockers = (value: any): BlockerItem[] => {
   if (typeof value === 'string') {
     let valueStr = value.trim();
     
-    // Strip markdown if present
-    if (valueStr.includes('```')) {
-      valueStr = stripMarkdown(valueStr);
-    }
-    
-    // If it looks like JSON, parse it
-    if (valueStr.startsWith('[') || valueStr.startsWith('{')) {
-      try {
-        const parsed = JSON.parse(valueStr);
-        return parseBlockers(parsed);
-      } catch {
-        // If parsing fails, try to extract from string
-      }
+    const parsedJson = tryParseJson(valueStr);
+    if (parsedJson) {
+      return parseBlockers(parsedJson);
     }
   }
   
@@ -387,9 +494,14 @@ const parseBlockers = (value: any): BlockerItem[] => {
           try {
             const parsed = JSON.parse(itemStr);
             return {
+              type: parsed.type,
+              title: parsed.title,
               description: parsed.description || parsed.text || '',
               quote: parsed.quote,
               timestamp: parsed.timestamp,
+              severity: parsed.severity,
+              impact: parsed.impact,
+              references: Array.isArray(parsed.references) ? parsed.references : undefined,
             };
           } catch {
             // If parsing fails, try regex extraction
@@ -411,9 +523,16 @@ const parseBlockers = (value: any): BlockerItem[] => {
       // If it's an object, extract fields
       if (typeof item === 'object' && item !== null) {
         return {
+          type: item.type,
+          title: item.title,
           description: item.description || item.text || '',
           quote: item.quote,
           timestamp: item.timestamp,
+          severity: item.severity,
+          impact: item.impact,
+          references: Array.isArray(item.references) ? item.references : undefined,
+          evidenceQuotes: Array.isArray(item.evidence_quotes) ? item.evidence_quotes : undefined,
+          missingInfo: Array.isArray(item.missing_info_to_resolve) ? item.missing_info_to_resolve : undefined,
         };
       }
       
@@ -430,28 +549,36 @@ const parseBlockers = (value: any): BlockerItem[] => {
 const parseCalendarEvents = (value: any): CalendarEvent[] => {
   if (!value) return [];
   
+  const parsedFromArray = tryParseJsonFromArray(value);
+  if (parsedFromArray) {
+    return parseCalendarEvents(parsedFromArray);
+  }
+
   // If value is a string with markdown code blocks, parse it
   if (typeof value === 'string') {
     let valueStr = value.trim();
     
-    // Strip markdown if present
-    if (valueStr.includes('```')) {
-      valueStr = stripMarkdown(valueStr);
-    }
-    
-    // If it looks like JSON, parse it
-    if (valueStr.startsWith('[') || valueStr.startsWith('{')) {
-      try {
-        const parsed = JSON.parse(valueStr);
-        return parseCalendarEvents(parsed);
-      } catch {
-        // Continue to other parsing methods
-      }
+    const parsedJson = tryParseJson(valueStr);
+    if (parsedJson) {
+      return parseCalendarEvents(parsedJson);
     }
   }
   
   // If it's an object with nested events array
   if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    if (value.suggestedEvents && Array.isArray(value.suggestedEvents)) {
+      return value.suggestedEvents.map((item: any) => ({
+        title: item.title || item.summary || '',
+        description: item.description,
+        startTime: item.start || item.startTime || item.start_time,
+        endTime: item.end || item.endTime || item.end_time,
+        timezone: item.timezone || item.timeZone,
+        attendees: Array.isArray(item.attendees) ? item.attendees : [],
+        status: item.status,
+        references: Array.isArray(item.references) ? item.references : undefined,
+        missingInfo: Array.isArray(item.missing_info) ? item.missing_info : undefined,
+      })).filter(item => item.title && item.title.trim());
+    }
     if (value.events && Array.isArray(value.events)) {
       return value.events.map((item: any) => ({
         title: item.title || item.Title || item.summary || '',
@@ -461,6 +588,8 @@ const parseCalendarEvents = (value: any): CalendarEvent[] => {
         timezone: item.timezone || item.Timezone || item.timeZone,
         attendees: Array.isArray(item.attendees) ? item.attendees : (item.Attendees ? (Array.isArray(item.Attendees) ? item.Attendees : []) : []),
         status: item.status || item.Status,
+        references: Array.isArray(item.references) ? item.references : undefined,
+        missingInfo: Array.isArray(item.missing_info) ? item.missing_info : undefined,
       })).filter(item => item.title && item.title.trim());
     }
   }
@@ -475,6 +604,8 @@ const parseCalendarEvents = (value: any): CalendarEvent[] => {
       timezone: item.timezone || item.Timezone || item.timeZone,
       attendees: Array.isArray(item.attendees) ? item.attendees : (item.Attendees ? (Array.isArray(item.Attendees) ? item.Attendees : []) : []),
       status: item.status || item.Status,
+      references: Array.isArray(item.references) ? item.references : undefined,
+      missingInfo: Array.isArray(item.missing_info) ? item.missing_info : undefined,
     }));
   }
   
@@ -482,19 +613,9 @@ const parseCalendarEvents = (value: any): CalendarEvent[] => {
   if (typeof value === 'string') {
     let valueStr = value.trim();
     
-    // Strip markdown if present
-    if (valueStr.includes('```')) {
-      valueStr = stripMarkdown(valueStr);
-    }
-    
-    // If it looks like JSON, parse it
-    if (valueStr.startsWith('[') || valueStr.startsWith('{')) {
-      try {
-        const parsed = JSON.parse(valueStr);
-        return parseCalendarEvents(parsed);
-      } catch {
-        // If parsing fails, try to extract from string
-      }
+    const parsedJson = tryParseJson(valueStr);
+    if (parsedJson) {
+      return parseCalendarEvents(parsedJson);
     }
   }
   
@@ -521,6 +642,8 @@ const parseCalendarEvents = (value: any): CalendarEvent[] => {
               timezone: parsed.timezone || parsed.Timezone || parsed.timeZone,
               attendees: Array.isArray(parsed.attendees) ? parsed.attendees : (parsed.Attendees ? (Array.isArray(parsed.Attendees) ? parsed.Attendees : []) : []),
               status: parsed.status || parsed.Status,
+              references: Array.isArray(parsed.references) ? parsed.references : undefined,
+              missingInfo: Array.isArray(parsed.missing_info) ? parsed.missing_info : undefined,
             };
           } catch {
             // If parsing fails, try regex extraction
@@ -547,6 +670,8 @@ const parseCalendarEvents = (value: any): CalendarEvent[] => {
           timezone: item.timezone || item.Timezone || item.timeZone,
           attendees: Array.isArray(item.attendees) ? item.attendees : (item.Attendees ? (Array.isArray(item.Attendees) ? item.Attendees : []) : []),
           status: item.status || item.Status,
+          references: Array.isArray(item.references) ? item.references : undefined,
+          missingInfo: Array.isArray(item.missing_info) ? item.missing_info : undefined,
         };
       }
       
@@ -560,8 +685,26 @@ const parseCalendarEvents = (value: any): CalendarEvent[] => {
 /**
  * Parses email data - extracts reason, recipients, subject, body, and references
  */
-const parseEmail = (value: any): EmailData => {
-  if (!value) return { body: '' };
+const formatReference = (ref: any): string => {
+  if (!ref) return '';
+  if (typeof ref === 'string') return ref;
+  if (typeof ref === 'object') {
+    const speaker = ref.speaker || ref.Speaker || '';
+    const timestamp = ref.timestamp || ref.Timestamp || ref.time || '';
+    const text = ref.text || ref.Text || ref.message || ref.content || '';
+    const parts = [speaker, timestamp && `(${timestamp})`, text].filter(Boolean);
+    return parts.join(' ').trim();
+  }
+  return String(ref);
+};
+
+const parseEmails = (value: any): EmailData[] => {
+  if (!value) return [];
+
+  const parsedFromArray = tryParseJsonFromArray(value);
+  if (parsedFromArray) {
+    return parseEmails(parsedFromArray);
+  }
   
   // If value is a string with multiple JSON objects (multiple email drafts), take the first one
   if (typeof value === 'string') {
@@ -573,183 +716,74 @@ const parseEmail = (value: any): EmailData => {
         const firstJson = jsonMatches[0];
         const cleaned = stripMarkdown(firstJson);
         const parsed = JSON.parse(cleaned);
-        return parseEmail(parsed);
+        return parseEmails(parsed);
       } catch {
         // Continue to other parsing methods
       }
+    }
+
+    const parsedJson = tryParseJson(value);
+    if (parsedJson) {
+      return parseEmails(parsedJson);
     }
   }
   
   // If it's an array of email drafts, take the first one
   if (Array.isArray(value) && value.length > 0) {
-    return parseEmail(value[0]);
+    return value.map((item: any) => parseEmails(item)).flat();
   }
   
   // If it's already an EmailData object, return as-is
   if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    if (value.allEmails && Array.isArray(value.allEmails)) {
+      return value.allEmails.map((item: any) => ({
+        reason: item.reason || item.Reason,
+        recipients: Array.isArray(item.recipients || item.Recipients) ? (item.recipients || item.Recipients) : [],
+        subject: item.subject || item.Subject || item.SubjectLine,
+        body: item.body || item.Body || item.text || item.content || '',
+        references: Array.isArray(item.references || item.References)
+          ? (item.references || item.References).map(formatReference).filter(Boolean)
+          : undefined,
+      })).filter(item => item.body && item.body.trim());
+    }
+
     // Parse references if they exist
-    let references: Array<{ speaker: string; text: string; timestamp: string }> | undefined;
+    let references: string[] | undefined;
     if (value.references || value.References) {
       const refs = value.references || value.References;
       if (Array.isArray(refs)) {
-        references = refs.map((ref: any) => {
-          if (typeof ref === 'string') {
-            // Try to parse string reference (e.g., "Sam (01:40): Right, I'll email Finance...")
-            const match = ref.match(/^([^(]+)\s*\(([^)]+)\):\s*(.+)$/);
-            if (match) {
-              return {
-                speaker: match[1].trim(),
-                timestamp: match[2].trim(),
-                text: match[3].trim(),
-              };
-            }
-            // Try format without text: "Sam (01:40)"
-            const simpleMatch = ref.match(/^([^(]+)\s*\(([^)]+)\)$/);
-            if (simpleMatch) {
-              return {
-                speaker: simpleMatch[1].trim(),
-                timestamp: simpleMatch[2].trim(),
-                text: '',
-              };
-            }
-            return {
-              speaker: '',
-              timestamp: '',
-              text: ref,
-            };
-          }
-          return {
-            speaker: ref.speaker || ref.Speaker || '',
-            timestamp: ref.timestamp || ref.Timestamp || ref.time || '',
-            text: ref.text || ref.Text || ref.message || ref.content || '',
-          };
-        });
+        references = refs.map(formatReference).filter(Boolean);
       }
     }
     
-    return {
+    return [{
       reason: value.reason || value.Reason,
       recipients: Array.isArray(value.recipients) ? value.recipients : (value.recipients ? [value.recipients] : []),
-      subject: value.subject || value.Subject,
+      subject: value.subject || value.Subject || value.SubjectLine,
       body: value.body || value.Body || value.text || value.content || '',
       references: references,
-    };
+    }];
   }
   
   // If it's a string, try to parse it
   if (typeof value === 'string') {
     let valueStr = value.trim();
     
-    // Strip markdown if present
-    if (valueStr.includes('```')) {
-      valueStr = stripMarkdown(valueStr);
-    }
-    
-    // If it looks like JSON, parse it
-    if (valueStr.startsWith('{') || valueStr.startsWith('[')) {
-      try {
-        const parsed = JSON.parse(valueStr);
-        // Parse references if they exist
-        let references: Array<{ speaker: string; text: string; timestamp: string }> | undefined;
-        if (parsed.references || parsed.References) {
-          const refs = parsed.references || parsed.References;
-          if (Array.isArray(refs)) {
-            references = refs.map((ref: any) => {
-              if (typeof ref === 'string') {
-                // Try to parse string reference (e.g., "Sam (01:40): Right, I'll email Finance...")
-                const match = ref.match(/^([^(]+)\s*\(([^)]+)\):\s*(.+)$/);
-                if (match) {
-                  return {
-                    speaker: match[1].trim(),
-                    timestamp: match[2].trim(),
-                    text: match[3].trim(),
-                  };
-                }
-                return {
-                  speaker: '',
-                  timestamp: '',
-                  text: ref,
-                };
-              }
-              return {
-                speaker: ref.speaker || ref.Speaker || '',
-                timestamp: ref.timestamp || ref.Timestamp || ref.time || '',
-                text: ref.text || ref.Text || ref.message || ref.content || '',
-              };
-            });
-          }
-        }
-        
-        return {
-          reason: parsed.reason || parsed.Reason,
-          recipients: Array.isArray(parsed.recipients) ? parsed.recipients : (parsed.recipients ? [parsed.recipients] : []),
-          subject: parsed.subject || parsed.Subject,
-          body: parsed.body || parsed.Body || parsed.text || parsed.content || '',
-          references: references,
-        };
-      } catch {
-        // If parsing fails, try to extract from string
-        const bodyMatch = valueStr.match(/"body"\s*:\s*"((?:[^"\\]|\\.|\\n)*)"/s);
-        const subjectMatch = valueStr.match(/"subject"\s*:\s*"([^"]+)"/i);
-        const reasonMatch = valueStr.match(/"reason"\s*:\s*"([^"]+)"/i);
-        
-        return {
-          reason: reasonMatch ? reasonMatch[1] : undefined,
-          recipients: [],
-          subject: subjectMatch ? subjectMatch[1] : undefined,
-          body: bodyMatch ? bodyMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\'/g, "'") : valueStr,
-          references: undefined,
-        };
-      }
+    const parsedJson = tryParseJson(valueStr);
+    if (parsedJson) {
+      return parseEmails(parsedJson);
     }
     
     // If it's just a plain string, treat it as the body
-    return { body: valueStr };
+    return [{ body: valueStr }];
   }
   
   // If it's an object, extract fields
   if (typeof value === 'object' && value !== null) {
-    // Parse references if they exist
-    let references: Array<{ speaker: string; text: string; timestamp: string }> | undefined;
-    if (value.references || value.References) {
-      const refs = value.references || value.References;
-      if (Array.isArray(refs)) {
-        references = refs.map((ref: any) => {
-          if (typeof ref === 'string') {
-            // Try to parse string reference (e.g., "Sam (01:40): Right, I'll email Finance...")
-            const match = ref.match(/^([^(]+)\s*\(([^)]+)\):\s*(.+)$/);
-            if (match) {
-              return {
-                speaker: match[1].trim(),
-                timestamp: match[2].trim(),
-                text: match[3].trim(),
-              };
-            }
-            return {
-              speaker: '',
-              timestamp: '',
-              text: ref,
-            };
-          }
-          return {
-            speaker: ref.speaker || ref.Speaker || '',
-            timestamp: ref.timestamp || ref.Timestamp || ref.time || '',
-            text: ref.text || ref.Text || ref.message || ref.content || '',
-          };
-        });
-      }
-    }
-    
-    return {
-      reason: value.reason || value.Reason,
-      recipients: Array.isArray(value.recipients) ? value.recipients : (value.recipients ? [value.recipients] : []),
-      subject: value.subject || value.Subject,
-      body: value.body || value.Body || value.text || value.content || '',
-      references: references,
-    };
+    return parseEmails(value);
   }
   
-  return { body: String(value) };
+  return [{ body: String(value) }];
 };
 
 /**
@@ -762,7 +796,7 @@ export const parseAnalysisResults = (rawResults: RawAnalysisResults): AnalysisRe
   return {
     summary: parseSummary(rawResults.summary),
     nextTasks: parseTasks(rawResults.nextTasks),
-    email: parseEmail(rawResults.email),
+    email: parseEmails(rawResults.email),
     calendar: parseCalendarEvents(rawResults.calendar),
     blockers: parseBlockers(rawResults.blockers),
   };

@@ -18,10 +18,10 @@ import { useGoogleAuth } from "@/contexts/GoogleAuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useState } from "react";
-import { parseAnalysisResults, type TaskItem, type BlockerItem, type CalendarEvent, type EmailData, type AnalysisResults } from "@/lib/parseAnalysisResults";
+import { parseAnalysisResults, type TaskItem, type BlockerItem, type CalendarEvent, type EmailData, type SummaryData, type AnalysisResults } from "@/lib/parseAnalysisResults";
 
 interface ResultsDisplayProps {
-  results: {
+  results: AnalysisResults | {
     summary?: any;
     nextTasks?: any;
     email?: any;
@@ -307,18 +307,34 @@ const FormattedText = ({ text }: { text: string }) => {
 export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
   const { isGoogleConnected, connectGoogle, accessToken, refreshToken } = useGoogleAuth();
   const { toast } = useToast();
-  const [emailSending, setEmailSending] = useState(false);
-  const [emailApproved, setEmailApproved] = useState(false);
-  const [emailDeclined, setEmailDeclined] = useState(false);
+  const [emailSending, setEmailSending] = useState<{ [key: number]: boolean }>({});
+  const [emailApproved, setEmailApproved] = useState<{ [key: number]: boolean }>({});
+  const [emailDeclined, setEmailDeclined] = useState<{ [key: number]: boolean }>({});
   const [calendarCreating, setCalendarCreating] = useState<{ [key: number]: boolean }>({});
   const [calendarApproved, setCalendarApproved] = useState<{ [key: number]: boolean }>({});
   const [calendarDeclined, setCalendarDeclined] = useState<{ [key: number]: boolean }>({});
+  const [taskCompleted, setTaskCompleted] = useState<{ [key: number]: boolean }>({});
 
   // Use the centralized helper function to parse analysis results
   // This ensures consistent parsing across the app
-  const parsedResults = parseAnalysisResults(results);
+  const parsedResults = (() => {
+    const candidate = results as AnalysisResults;
+    const isParsed = Boolean(
+      candidate &&
+      typeof candidate === 'object' &&
+      candidate.summary &&
+      typeof candidate.summary === 'object' &&
+      'text' in candidate.summary &&
+      'bullets' in candidate.summary &&
+      Array.isArray(candidate.nextTasks) &&
+      Array.isArray(candidate.email) &&
+      Array.isArray(candidate.calendar) &&
+      Array.isArray(candidate.blockers)
+    );
+    return isParsed ? candidate : parseAnalysisResults(results);
+  })();
 
-  const handleApproveEmail = async () => {
+  const handleApproveEmail = async (emailData: EmailData, index: number) => {
     if (!isGoogleConnected || !accessToken) {
       toast({
         title: "Not Connected",
@@ -328,8 +344,8 @@ export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
       return;
     }
 
-    setEmailApproved(true);
-    setEmailSending(true);
+    setEmailApproved(prev => ({ ...prev, [index]: true }));
+    setEmailSending(prev => ({ ...prev, [index]: true }));
     
     try {
       // Try to refresh token if needed
@@ -348,7 +364,6 @@ export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
       }
 
       // Use structured email data
-      const emailData = parsedResults.email;
       const emailBody = emailData.body || '';
       const emailSubject = emailData.subject || 'Meeting Follow-up';
       const recipients = emailData.recipients || [];
@@ -414,7 +429,7 @@ export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
       });
     } catch (error: any) {
       console.error('Error saving email draft:', error);
-      setEmailApproved(false);
+      setEmailApproved(prev => ({ ...prev, [index]: false }));
 
       const msg = (error?.message || String(error || '')).toLowerCase();
 
@@ -433,12 +448,12 @@ export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
         });
       }
     } finally {
-      setEmailSending(false);
+      setEmailSending(prev => ({ ...prev, [index]: false }));
     }
   };
 
-  const handleDeclineEmail = () => {
-    setEmailDeclined(true);
+  const handleDeclineEmail = (index: number) => {
+    setEmailDeclined(prev => ({ ...prev, [index]: true }));
     toast({
       title: "Email Declined",
       description: "Email draft has been declined.",
@@ -540,15 +555,15 @@ export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
   const sections = [
     {
       title: "Meeting Summary",
-      description: "Key points and decisions",
+      description: "Key points with action items",
       icon: FileText,
       content: parsedResults.summary,
       color: "text-primary",
       type: "summary",
     },
     {
-      title: "Follow-up Email",
-      description: "Ready-to-send draft",
+      title: "Follow-up Emails",
+      description: "Ready-to-send drafts",
       icon: Mail,
       content: parsedResults.email,
       color: "text-primary",
@@ -579,6 +594,14 @@ export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
       type: "blockers",
     },
   ];
+
+  const topRowSections = sections.filter(section =>
+    section.type === 'summary' || section.type === 'email' || section.type === 'tasks'
+  );
+
+  const bottomRowSections = sections.filter(section =>
+    section.type === 'calendar' || section.type === 'blockers'
+  );
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6">
@@ -611,14 +634,18 @@ export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
       </div>
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 max-w-6xl mx-auto">
-        {sections.map((section, index) => {
+        {topRowSections.map((section, index) => {
           const Icon = section.icon;
           const isArray = Array.isArray(section.content);
-          const hasContent = isArray ? section.content.length > 0 : section.content;
+          const hasContent = section.type === 'summary'
+            ? Boolean((section.content as SummaryData)?.text || (section.content as SummaryData)?.bullets?.length)
+            : isArray
+              ? section.content.length > 0
+              : section.content;
           
           return (
             <Card 
-              key={index} 
+              key={section.type} 
               className="shadow-md hover:shadow-xl transition-all duration-300 hover:scale-[1.02] animate-fade-in"
               style={{ animationDelay: `${index * 100}ms` }}
             >
@@ -632,17 +659,54 @@ export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
               <CardContent className="space-y-4">
                 {!hasContent ? (
                   <p className="text-sm text-muted-foreground italic">No content available</p>
+                ) : section.type === 'summary' ? (
+                  <div className="space-y-4">
+                    <div className="prose prose-sm max-w-none bg-muted/50 p-4 rounded-lg border">
+                      <FormattedText text={(section.content as SummaryData).text} />
+                    </div>
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-muted-foreground">Action Items</p>
+                      {(section.content as SummaryData).bullets.length === 0 ? (
+                        <p className="text-sm text-muted-foreground italic">No action items available</p>
+                      ) : (
+                        <ul className="space-y-2">
+                          {(section.content as SummaryData).bullets.map((bullet, i) => {
+                            const match = bullet.match(/^(Action item|Plan):\s*/i);
+                            const prefix = match ? match[0] : '';
+                            const rest = match ? bullet.slice(prefix.length) : bullet;
+
+                            return (
+                              <li key={i} className="text-sm text-muted-foreground">
+                                • {prefix && <span className="font-semibold text-foreground">{prefix}</span>}
+                                {rest}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
                 ) : section.type === 'tasks' ? (
                   // Tasks Card - Display task, rationale, and priority
                   <ul className="space-y-3">
                     {(section.content as TaskItem[]).map((task, i) => (
                       <li key={i} className="p-3 rounded-lg border bg-muted/50 hover:bg-muted transition-colors">
                         <div className="flex items-start gap-2">
-                          <Badge variant="secondary" className="mt-0.5 shrink-0">
-                            {i + 1}
-                          </Badge>
+                          <input
+                            type="checkbox"
+                            className="mt-1 h-4 w-4 accent-primary"
+                            checked={Boolean(taskCompleted[i])}
+                            onChange={() => setTaskCompleted(prev => ({ ...prev, [i]: !prev[i] }))}
+                          />
                           <div className="flex-1 space-y-1">
-                            <p className="text-sm font-medium">{task.task}</p>
+                            <p className={`text-sm font-medium ${taskCompleted[i] ? 'line-through text-muted-foreground' : ''}`}>
+                              {task.task}
+                            </p>
+                            {task.owner && (
+                              <p className="text-xs text-muted-foreground">
+                                <span className="font-semibold">Owner:</span> {task.owner}
+                              </p>
+                            )}
                             {task.rationale && (
                               <p className="text-xs text-muted-foreground italic">
                                 <span className="font-semibold">Rationale:</span> {task.rationale}
@@ -653,141 +717,26 @@ export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
                                 {task.priority} priority
                               </Badge>
                             )}
-                          </div>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                ) : section.type === 'blockers' ? (
-                  // Blockers Card - Display description, quote, and timestamp
-                  <ul className="space-y-3">
-                    {(section.content as BlockerItem[]).map((blocker, i) => (
-                      <li key={i} className="p-3 rounded-lg border border-destructive/20 bg-destructive/5 hover:bg-destructive/10 transition-colors">
-                        <div className="flex items-start gap-2">
-                          <Badge variant="destructive" className="mt-0.5 shrink-0">
-                            {i + 1}
-                          </Badge>
-                          <div className="flex-1 space-y-1">
-                            <p className="text-sm font-medium">{blocker.description}</p>
-                            {blocker.quote && (
-                              <p className="text-xs text-muted-foreground italic border-l-2 border-muted-foreground pl-2">
-                                "{blocker.quote}"
-                              </p>
-                            )}
-                            {blocker.timestamp && (
+                            {task.references && task.references.length > 0 && (
                               <p className="text-xs text-muted-foreground">
-                                <span className="font-semibold">Time:</span> {blocker.timestamp}
+                                <span className="font-semibold">Refs:</span> {task.references.join(', ')}
                               </p>
                             )}
                           </div>
                         </div>
                       </li>
                     ))}
-                  </ul>
-                ) : section.type === 'calendar' ? (
-                  // Calendar Card - Display title, description, time, attendees, status with buttons
-                  <ul className="space-y-3">
-                    {(section.content as CalendarEvent[]).map((event, i) => {
-                      const isApproved = calendarApproved[i];
-                      const isDeclined = calendarDeclined[i];
-                      const isCreating = calendarCreating[i];
-                      
-                      return (
-                        <li 
-                          key={i} 
-                          className={`p-3 rounded-lg border transition-all ${
-                            isApproved ? 'bg-green-50 dark:bg-green-950 border-green-200' :
-                            isDeclined ? 'bg-red-50 dark:bg-red-950 border-red-200 opacity-60' :
-                            'bg-muted/50 hover:bg-muted'
-                          }`}
-                        >
-                          <div className="flex items-start gap-2">
-                            <Badge variant="secondary" className="mt-0.5 shrink-0">
-                              {i + 1}
-                            </Badge>
-                            <div className="flex-1 space-y-2">
-                              <p className="text-sm font-medium">{event.title}</p>
-                              {event.description && (
-                                <p className="text-xs text-muted-foreground">{event.description}</p>
-                              )}
-                              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                                {event.startTime && (
-                                  <span>
-                                    <span className="font-semibold">Start:</span> {new Date(event.startTime).toLocaleString()}
-                                  </span>
-                                )}
-                                {event.endTime && (
-                                  <span>
-                                    <span className="font-semibold">End:</span> {new Date(event.endTime).toLocaleString()}
-                                  </span>
-                                )}
-                                {event.timezone && (
-                                  <span>
-                                    <span className="font-semibold">TZ:</span> {event.timezone}
-                                  </span>
-                                )}
-                              </div>
-                              {event.attendees && event.attendees.length > 0 && (
-                                <div className="text-xs text-muted-foreground">
-                                  <span className="font-semibold">Attendees:</span> {event.attendees.join(', ')}
-                                </div>
-                              )}
-                              {event.status && (
-                                <Badge variant="outline" className="text-xs">
-                                  {event.status}
-                                </Badge>
-                              )}
-                            </div>
-                            {!isApproved && !isDeclined && (
-                              <div className="flex gap-1 shrink-0">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleApproveCalendar(event, i)}
-                                  disabled={isCreating || !isGoogleConnected}
-                                  className="h-7 px-2 hover:bg-green-50 hover:border-green-300"
-                                >
-                                  {isCreating ? (
-                                    <div className="w-3 h-3 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
-                                  ) : (
-                                    <CheckCircle className="w-3 h-3 text-green-600" />
-                                  )}
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleDeclineCalendar(i)}
-                                  disabled={isCreating || !isGoogleConnected}
-                                  className="h-7 px-2 hover:bg-red-50 hover:border-red-300"
-                                >
-                                  <X className="w-3 h-3 text-red-600" />
-                                </Button>
-                              </div>
-                            )}
-                            {isApproved && (
-                              <Badge variant="outline" className="bg-green-100 text-green-700 border-green-300">
-                                <CheckCircle className="w-3 h-3 mr-1" />
-                                Added
-                              </Badge>
-                            )}
-                            {isDeclined && (
-                              <Badge variant="outline" className="bg-red-100 text-red-700 border-red-300">
-                                <X className="w-3 h-3 mr-1" />
-                                Declined
-                              </Badge>
-                            )}
-                          </div>
-                        </li>
-                      );
-                    })}
                   </ul>
                 ) : section.type === 'email' ? (
                   // Email Card - Display reason, recipients, subject, body, and references
                   <div className="space-y-4">
-                    {(() => {
-                      const email = section.content as EmailData;
+                    {(section.content as EmailData[]).map((email, i) => {
+                      const isSending = emailSending[i];
+                      const isApproved = emailApproved[i];
+                      const isDeclined = emailDeclined[i];
+
                       return (
-                        <>
+                        <div key={i} className="space-y-3 border rounded-lg p-3 bg-muted/30">
                           {email.reason && (
                             <div className="p-2 rounded bg-muted/50">
                               <p className="text-xs font-semibold text-muted-foreground mb-1">Reason:</p>
@@ -810,64 +759,62 @@ export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
                             <FormattedText text={email.body} />
                           </div>
                           {email.references && email.references.length > 0 && (
-                            <div className="mt-4 p-3 rounded-lg border bg-muted/30">
+                            <div className="mt-2 p-3 rounded-lg border bg-muted/30">
                               <p className="text-xs font-semibold text-muted-foreground mb-2">References:</p>
                               <ul className="space-y-2 text-xs">
                                 {email.references.map((ref, idx) => (
-                                  <li key={idx} className="border-l-2 border-muted-foreground pl-2">
-                                    <span className="font-semibold">{ref.speaker}</span>
-                                    {ref.timestamp && <span className="text-muted-foreground"> ({ref.timestamp})</span>}
-                                    <p className="mt-1 italic">{ref.text}</p>
+                                  <li key={idx} className="border-l-2 border-muted-foreground pl-2 italic">
+                                    {ref}
                                   </li>
                                 ))}
                               </ul>
                             </div>
                           )}
-                        </>
-                      );
-                    })()}
-                    {!emailApproved && !emailDeclined && (
-                      <div className="flex gap-2 mt-4">
-                        <Button
-                          onClick={handleApproveEmail}
-                          disabled={emailSending || !isGoogleConnected}
-                          className="flex-1 bg-green-600 hover:bg-green-700 text-white"
-                        >
-                          {emailSending ? (
-                            <>
-                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
-                              Saving...
-                            </>
-                          ) : (
-                            <>
-                              <Send className="w-4 h-4 mr-2" />
-                              Save to Drafts
-                            </>
+                          {!isApproved && !isDeclined && (
+                            <div className="flex gap-2 mt-2">
+                              <Button
+                                onClick={() => handleApproveEmail(email, i)}
+                                disabled={isSending || !isGoogleConnected}
+                                className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                              >
+                                {isSending ? (
+                                  <>
+                                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                                    Saving...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Send className="w-4 h-4 mr-2" />
+                                    Save to Drafts
+                                  </>
+                                )}
+                              </Button>
+                              <Button
+                                onClick={() => handleDeclineEmail(i)}
+                                disabled={isSending}
+                                variant="outline"
+                                className="flex-1"
+                              >
+                                <X className="w-4 h-4 mr-2" />
+                                Decline
+                              </Button>
+                            </div>
                           )}
-                        </Button>
-                        <Button
-                          onClick={handleDeclineEmail}
-                          disabled={emailSending}
-                          variant="outline"
-                          className="flex-1"
-                        >
-                          <X className="w-4 h-4 mr-2" />
-                          Decline
-                        </Button>
-                      </div>
-                    )}
-                    {emailApproved && (
-                      <Badge variant="outline" className="bg-green-100 text-green-700 border-green-300 mt-4">
-                        <CheckCircle className="w-4 h-4 mr-1" />
-                        Draft Saved
-                      </Badge>
-                    )}
-                    {emailDeclined && (
-                      <Badge variant="outline" className="bg-red-100 text-red-700 border-red-300 mt-4">
-                        <X className="w-4 h-4 mr-1" />
-                        Email Declined
-                      </Badge>
-                    )}
+                          {isApproved && (
+                            <Badge variant="outline" className="bg-green-100 text-green-700 border-green-300 mt-2">
+                              <CheckCircle className="w-4 h-4 mr-1" />
+                              Draft Saved
+                            </Badge>
+                          )}
+                          {isDeclined && (
+                            <Badge variant="outline" className="bg-red-100 text-red-700 border-red-300 mt-2">
+                              <X className="w-4 h-4 mr-1" />
+                              Email Declined
+                            </Badge>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : isArray ? (
                   // Fallback for other array types
@@ -876,6 +823,7 @@ export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
                       {(section.content as string[]).map((item, i) => {
                         // Aggressively extract text from JSON
                         let itemText = '';
+                        const eventData = typeof item === 'object' && item !== null ? (item as CalendarEvent) : null;
                         
                         if (typeof item === 'string') {
                           itemText = item;
@@ -1053,12 +1001,12 @@ export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
                               {i + 1}
                             </Badge>
                             <span className="flex-1 text-sm leading-relaxed">{renderText(itemText)}</span>
-                            {section.type === 'calendar' && !isApproved && !isDeclined && (
+                            {section.type === 'calendar' && eventData && !isApproved && !isDeclined && (
                               <div className="flex gap-1 shrink-0">
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => handleApproveCalendar(itemText, i)}
+                                  onClick={() => handleApproveCalendar(eventData, i)}
                                   disabled={isCreating || !isGoogleConnected}
                                   className="h-7 px-2 hover:bg-green-50 hover:border-green-300"
                                 >
@@ -1273,6 +1221,210 @@ export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
                     )}
                   </>
                 )}
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      <div className="grid gap-6 md:grid-cols-2 max-w-4xl mx-auto">
+        {bottomRowSections.map((section, index) => {
+          const Icon = section.icon;
+          const isArray = Array.isArray(section.content);
+          const hasContent = isArray ? section.content.length > 0 : section.content;
+
+          return (
+            <Card
+              key={section.type}
+              className="shadow-md hover:shadow-xl transition-all duration-300 hover:scale-[1.02] animate-fade-in"
+              style={{ animationDelay: `${(index + topRowSections.length) * 100}ms` }}
+            >
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Icon className={`w-5 h-5 ${section.color} animate-pulse`} />
+                  {section.title}
+                </CardTitle>
+                <CardDescription>{section.description}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {!hasContent ? (
+                  <p className="text-sm text-muted-foreground italic">No content available</p>
+                ) : section.type === 'blockers' ? (
+                  <ul className="space-y-3">
+                    {(section.content as BlockerItem[]).map((blocker, i) => (
+                      <li key={i} className="p-3 rounded-lg border border-destructive/20 bg-destructive/5 hover:bg-destructive/10 transition-colors">
+                        <div className="flex items-start gap-2">
+                          <Badge variant="destructive" className="mt-0.5 shrink-0">
+                            {i + 1}
+                          </Badge>
+                          <div className="flex-1 space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              {blocker.type && (
+                                <Badge variant="outline" className="text-xs">
+                                  {blocker.type}
+                                </Badge>
+                              )}
+                              {blocker.severity && (
+                                <Badge variant={blocker.severity === 'high' ? 'destructive' : blocker.severity === 'medium' ? 'default' : 'secondary'} className="text-xs">
+                                  {blocker.severity} severity
+                                </Badge>
+                              )}
+                            </div>
+                            {blocker.title && (
+                              <p className="text-sm font-semibold">{blocker.title}</p>
+                            )}
+                            <p className="text-sm font-medium">{blocker.description}</p>
+                            {blocker.quote && (
+                              <p className="text-xs text-muted-foreground italic border-l-2 border-muted-foreground pl-2">
+                                "{blocker.quote}"
+                              </p>
+                            )}
+                            {blocker.evidenceQuotes && blocker.evidenceQuotes.length > 0 && (
+                              <div className="text-xs text-muted-foreground italic border-l-2 border-muted-foreground pl-2 space-y-1">
+                                {blocker.evidenceQuotes.map((quote, idx) => (
+                                  <p key={idx}>"{quote}"</p>
+                                ))}
+                              </div>
+                            )}
+                            {blocker.timestamp && (
+                              <p className="text-xs text-muted-foreground">
+                                <span className="font-semibold">Time:</span> {blocker.timestamp}
+                              </p>
+                            )}
+                            {blocker.impact && (
+                              <p className="text-xs text-muted-foreground">
+                                <span className="font-semibold">Impact:</span> {blocker.impact}
+                              </p>
+                            )}
+                            {blocker.references && blocker.references.length > 0 && (
+                              <p className="text-xs text-muted-foreground">
+                                <span className="font-semibold">Refs:</span> {blocker.references.join(', ')}
+                              </p>
+                            )}
+                            {blocker.missingInfo && blocker.missingInfo.length > 0 && (
+                              <p className="text-xs text-muted-foreground">
+                                <span className="font-semibold">Missing:</span> {blocker.missingInfo.join(', ')}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : section.type === 'calendar' ? (
+                  <ul className="space-y-3">
+                    {(section.content as CalendarEvent[]).map((event, i) => {
+                      const isApproved = calendarApproved[i];
+                      const isDeclined = calendarDeclined[i];
+                      const isCreating = calendarCreating[i];
+                      const needsResolve = Boolean(event.missingInfo && event.missingInfo.length > 0);
+                      const showStatus = Boolean(event.status && !event.status.toLowerCase().includes('pending'));
+                      
+                      return (
+                        <li 
+                          key={i} 
+                          className={`p-3 rounded-lg border transition-all ${
+                            isApproved ? 'bg-green-50 dark:bg-green-950 border-green-200' :
+                            isDeclined ? 'bg-red-50 dark:bg-red-950 border-red-200 opacity-60' :
+                            'bg-muted/50 hover:bg-muted'
+                          }`}
+                        >
+                          <div className="flex items-start gap-2">
+                            <Badge variant="secondary" className="mt-0.5 shrink-0">
+                              {i + 1}
+                            </Badge>
+                            <div className="flex-1 space-y-2">
+                              <p className="text-sm font-medium">{event.title}</p>
+                              {event.description && (
+                                <p className="text-xs text-muted-foreground">{event.description}</p>
+                              )}
+                              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                                {event.startTime && (
+                                  <span>
+                                    <span className="font-semibold">Start:</span> {new Date(event.startTime).toLocaleString()}
+                                  </span>
+                                )}
+                                {event.endTime && (
+                                  <span>
+                                    <span className="font-semibold">End:</span> {new Date(event.endTime).toLocaleString()}
+                                  </span>
+                                )}
+                                {event.timezone && (
+                                  <span>
+                                    <span className="font-semibold">TZ:</span> {event.timezone}
+                                  </span>
+                                )}
+                              </div>
+                              {event.attendees && event.attendees.length > 0 && (
+                                <div className="text-xs text-muted-foreground">
+                                  <span className="font-semibold">Attendees:</span> {event.attendees.join(', ')}
+                                </div>
+                              )}
+                              {event.references && event.references.length > 0 && (
+                                <div className="text-xs text-muted-foreground">
+                                  <span className="font-semibold">Refs:</span> {event.references.join(', ')}
+                                </div>
+                              )}
+                              {event.missingInfo && event.missingInfo.length > 0 && (
+                                <div className="text-xs text-muted-foreground">
+                                  <span className="font-semibold">Missing:</span> {event.missingInfo.join(', ')}
+                                </div>
+                              )}
+                              {showStatus && (
+                                <Badge variant="outline" className="text-xs">
+                                  {event.status}
+                                </Badge>
+                              )}
+                            </div>
+                            {!isApproved && !isDeclined && (
+                              <div className="flex gap-1 shrink-0">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleApproveCalendar(event, i)}
+                                  disabled={isCreating || !isGoogleConnected}
+                                  className="h-7 px-2 hover:bg-green-50 hover:border-green-300"
+                                >
+                                  {isCreating ? (
+                                    <div className="w-3 h-3 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
+                                  ) : (
+                                    <span className="flex items-center gap-1 text-xs text-green-700">
+                                      <CheckCircle className="w-3 h-3 text-green-600" />
+                                      {needsResolve ? 'Resolve' : 'Add'}
+                                    </span>
+                                  )}
+                                </Button>
+                                {!needsResolve && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleDeclineCalendar(i)}
+                                    disabled={isCreating || !isGoogleConnected}
+                                    className="h-7 px-2 hover:bg-red-50 hover:border-red-300"
+                                  >
+                                    <X className="w-3 h-3 text-red-600" />
+                                  </Button>
+                                )}
+                              </div>
+                            )}
+                            {isApproved && (
+                              <Badge variant="outline" className="bg-green-100 text-green-700 border-green-300">
+                                <CheckCircle className="w-3 h-3 mr-1" />
+                                Added
+                              </Badge>
+                            )}
+                            {isDeclined && (
+                              <Badge variant="outline" className="bg-red-100 text-red-700 border-red-300">
+                                <X className="w-3 h-3 mr-1" />
+                                Declined
+                              </Badge>
+                            )}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : null}
               </CardContent>
             </Card>
           );
