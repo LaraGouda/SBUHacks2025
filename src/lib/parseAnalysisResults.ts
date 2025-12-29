@@ -5,11 +5,13 @@
 
 // Type definitions for each card type
 export interface TaskItem {
+  id?: string;
   task: string;
   owner?: string | null;
   rationale?: string;
   priority?: string;
   references?: string[];
+  completed?: boolean;
 }
 
 export interface BlockerItem {
@@ -270,11 +272,13 @@ const parseTasks = (value: any): TaskItem[] => {
       const steps = value.next_steps || value.nextSteps;
       if (Array.isArray(steps)) {
         return steps.map((item: any) => ({
+          id: item.id,
           task: item.task || item.item || item.description || '',
           owner: item.owner ?? item.assignee ?? null,
           rationale: item.rationale,
           priority: item.priority,
           references: Array.isArray(item.references) ? item.references : undefined,
+          completed: typeof item.completed === 'boolean' ? item.completed : undefined,
         })).filter(item => item.task && item.task.trim());
       }
     }
@@ -288,14 +292,16 @@ const parseTasks = (value: any): TaskItem[] => {
     }
   }
   
-  // If it's already an array of TaskItem objects, return as-is
+  // If it's already an array of TaskItem objects, return as-is (preserve id/completed if present)
   if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'object' && value[0].task) {
     return value.map(item => ({
+      id: item.id,
       task: item.task || '',
       owner: item.owner ?? item.assignee ?? null,
       rationale: item.rationale,
       priority: item.priority,
       references: Array.isArray(item.references) ? item.references : undefined,
+      completed: typeof item.completed === 'boolean' ? item.completed : undefined,
     }));
   }
   
@@ -351,11 +357,13 @@ const parseTasks = (value: any): TaskItem[] => {
       // If it's an object, extract fields
       if (typeof item === 'object' && item !== null) {
         return {
+          id: item.id,
           task: item.task || item.item || item.description || '',
           owner: item.owner ?? item.assignee ?? null,
           rationale: item.rationale,
           priority: item.priority,
           references: Array.isArray(item.references) ? item.references : undefined,
+          completed: typeof item.completed === 'boolean' ? item.completed : undefined,
         };
       }
       

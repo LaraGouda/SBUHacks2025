@@ -7,11 +7,9 @@ interface HeroProps {
 
 export const Hero = ({ onGetStarted }: HeroProps) => {
   return (
-    <section className="relative min-h-[90vh] flex items-center justify-center overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-subtle" />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(120,119,198,0.1),rgba(255,255,255,0))]" />
+    <section className="relative min-h-[80vh] flex items-center justify-center overflow-hidden">
       
-      <div className="container relative z-10 mx-auto px-4 py-20">
+      <div className="container relative z-10 mx-auto px-4 pt-6 pb-16">
         <div className="max-w-4xl mx-auto text-center space-y-8 animate-fade-in">
           <div className="flex justify-center mb-6">
             <img src="/logo.png" alt="FollowUp" className="w-24 h-24 md:w-32 md:h-32 animate-fade-in" />
@@ -31,32 +29,15 @@ export const Hero = ({ onGetStarted }: HeroProps) => {
             Automatically extract summaries, action items, follow-up emails, and blockers from your meeting transcripts with AI.
           </p>
           
-          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center pt-4">
+          <div className="flex justify-center items-center pt-4">
             <Button
               size="lg"
               onClick={onGetStarted}
               className="bg-gradient-primary hover:shadow-glow transition-all duration-300 group"
             >
-              Get Started
+              Analyze Transcript
               <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </Button>
-            <Button size="lg" variant="outline">
-              Learn More
-            </Button>
-          </div>
-          
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 pt-12 max-w-3xl mx-auto">
-            {[
-              { label: "Instant Summaries", value: "AI-Powered" },
-              { label: "Action Items", value: "Auto-Extract" },
-              { label: "Email Drafts", value: "Ready to Send" },
-              { label: "Blocker Detection", value: "Smart Analysis" },
-            ].map((stat, i) => (
-              <div key={i} className="text-center">
-                <div className="text-2xl font-bold text-primary">{stat.value}</div>
-                <div className="text-sm text-muted-foreground">{stat.label}</div>
-              </div>
-            ))}
           </div>
         </div>
       </div>

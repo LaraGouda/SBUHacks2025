@@ -38,3 +38,4 @@ __MACOSX/
 # Misc
 *.local
 coverage/
+supabase/.temp/

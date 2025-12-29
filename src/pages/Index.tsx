@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Hero } from "@/components/Hero";
 import { TranscriptInput } from "@/components/TranscriptInput";
 import { ResultsDisplay } from "@/components/ResultsDisplay";
 import { Dashboard } from "@/components/Dashboard";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, LogOut, History, User, LayoutDashboard } from "lucide-react";
+import { ArrowLeft, LogIn, LogOut, History, User, LayoutDashboard } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -20,9 +20,17 @@ const Index = () => {
   const { signOut, user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const isAuthed = Boolean(user);
+
+  useEffect(() => {
+    if (!isAuthed) {
+      setShowDashboard(false);
+    }
+  }, [isAuthed]);
 
   const handleSignOut = async () => {
     await signOut();
+    handleReset();
     toast({
       title: "Signed out",
       description: "You've been successfully signed out.",
@@ -30,6 +38,14 @@ const Index = () => {
   };
 
   const handleGetStarted = () => {
+    if (!isAuthed) {
+      toast({
+        title: "Sign in required",
+        description: "Please sign in to analyze transcripts.",
+      });
+      navigate("/auth");
+      return;
+    }
     setShowInput(true);
   };
 
@@ -96,6 +112,14 @@ const Index = () => {
   };
 
   const handleShowDashboard = () => {
+    if (!isAuthed) {
+      toast({
+        title: "Sign in required",
+        description: "Please sign in to access your dashboard.",
+      });
+      navigate("/auth");
+      return;
+    }
     setShowDashboard(true);
     setShowInput(false);
     setResults(null);
@@ -116,22 +140,35 @@ const Index = () => {
                 Back to Home
               </Button>
             )}
-            <Button variant="outline" onClick={handleShowDashboard}>
-              <LayoutDashboard className="w-4 h-4 mr-2" />
-              Dashboard
-            </Button>
-            <Button variant="outline" onClick={() => navigate('/meetings')}>
-              <History className="w-4 h-4 mr-2" />
-              History
-            </Button>
-            <Button variant="outline" onClick={() => navigate('/profile')}>
-              <User className="w-4 h-4 mr-2" />
-              Profile
-            </Button>
-            <Button variant="outline" onClick={handleSignOut}>
-              <LogOut className="w-4 h-4 mr-2" />
-              Sign Out
-            </Button>
+            {isAuthed && (
+              <Button variant="outline" onClick={handleShowDashboard}>
+                <LayoutDashboard className="w-4 h-4 mr-2" />
+                Dashboard
+              </Button>
+            )}
+            {isAuthed && (
+              <Button variant="outline" onClick={() => navigate('/meetings')}>
+                <History className="w-4 h-4 mr-2" />
+                History
+              </Button>
+            )}
+            {isAuthed && (
+              <Button variant="outline" onClick={() => navigate('/profile')}>
+                <User className="w-4 h-4 mr-2" />
+                Profile
+              </Button>
+            )}
+            {isAuthed ? (
+              <Button variant="outline" onClick={handleSignOut}>
+                <LogOut className="w-4 h-4 mr-2" />
+                Sign Out
+              </Button>
+            ) : (
+              <Button variant="outline" onClick={() => navigate('/auth')}>
+                <LogIn className="w-4 h-4 mr-2" />
+                Sign In
+              </Button>
+            )}
           </div>
         </div>
       </header>
@@ -162,7 +199,7 @@ const Index = () => {
         )}
       </main>
 
-      <footer className="border-t mt-20 py-8 bg-card/50 backdrop-blur-sm">
+      <footer className="border-t mt-0 py-1">
         <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
           <p>© 2025 FollowUp. Transform your meetings into actionable insights.</p>
         </div>

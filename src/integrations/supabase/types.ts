@@ -80,7 +80,7 @@ export type Database = {
           title: string
           transcript: string
           summary: string | null
-          status: 'pending' | 'analyzing' | 'analyzed' | 'failed'
+          status: 'pending' | 'analyzing' | 'analyzed' | 'failed' | 'resolved'
           created_at: string
           updated_at: string
         }
@@ -90,7 +90,7 @@ export type Database = {
           title: string
           transcript: string
           summary?: string | null
-          status?: 'pending' | 'analyzing' | 'analyzed' | 'failed'
+          status?: 'pending' | 'analyzing' | 'analyzed' | 'failed' | 'resolved'
           created_at?: string
           updated_at?: string
         }
@@ -100,7 +100,7 @@ export type Database = {
           title?: string
           transcript?: string
           summary?: string | null
-          status?: 'pending' | 'analyzing' | 'analyzed' | 'failed'
+          status?: 'pending' | 'analyzing' | 'analyzed' | 'failed' | 'resolved'
           created_at?: string
           updated_at?: string
         }

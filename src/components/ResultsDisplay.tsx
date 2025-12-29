@@ -28,6 +28,9 @@ interface ResultsDisplayProps {
     calendar?: any;
     blockers?: any;
   };
+  onTaskToggle?: (taskId: string, nextValue: boolean) => void;
+  layout?: "grid" | "stacked";
+  showHeader?: boolean;
 }
 
 // Enhanced JSON parser that handles various formats and always returns readable text
@@ -304,7 +307,7 @@ const FormattedText = ({ text }: { text: string }) => {
   );
 };
 
-export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
+export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHeader = true }: ResultsDisplayProps) => {
   const { isGoogleConnected, connectGoogle, accessToken, refreshToken } = useGoogleAuth();
   const { toast } = useToast();
   const [emailSending, setEmailSending] = useState<{ [key: number]: boolean }>({});
@@ -603,37 +606,41 @@ export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
     section.type === 'calendar' || section.type === 'blockers'
   );
 
-  return (
-    <div className="w-full max-w-6xl mx-auto space-y-6">
-      <div className="text-center space-y-2 mb-8 animate-fade-in">
-        <div className="flex items-center justify-center gap-2 mb-2">
-          <Sparkles className="w-6 h-6 text-primary animate-pulse" />
-          <h2 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">
-            Analysis Complete
-          </h2>
-        </div>
-        <p className="text-muted-foreground">
-          Here are the insights extracted from your meeting
-        </p>
-        {!isGoogleConnected && (
-          <Button 
-            onClick={connectGoogle} 
-            variant="outline" 
-            className="mt-4 hover:scale-105 transition-transform"
-          >
-            <LinkIcon className="w-4 h-4 mr-2" />
-            Connect Google Account
-          </Button>
-        )}
-        {isGoogleConnected && (
-          <div className="flex items-center justify-center gap-2 mt-4 animate-fade-in">
-            <CheckCircle className="w-4 h-4 text-green-600 animate-pulse" />
-            <span className="text-sm text-muted-foreground">Google account connected</span>
-          </div>
-        )}
-      </div>
+  const isStacked = layout === "stacked";
 
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 max-w-6xl mx-auto">
+  return (
+    <div className={`w-full ${isStacked ? "max-w-none mx-0" : "max-w-6xl mx-auto"} space-y-6`}>
+      {showHeader && (
+        <div className="text-center space-y-2 mb-8 animate-fade-in">
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <Sparkles className="w-6 h-6 text-primary animate-pulse" />
+            <h2 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+              Analysis Complete
+            </h2>
+          </div>
+          <p className="text-muted-foreground">
+            Here are the insights extracted from your meeting
+          </p>
+          {!isGoogleConnected && (
+            <Button 
+              onClick={connectGoogle} 
+              variant="outline" 
+              className="mt-4 hover:scale-105 transition-transform"
+            >
+              <LinkIcon className="w-4 h-4 mr-2" />
+              Connect Google Account
+            </Button>
+          )}
+          {isGoogleConnected && (
+            <div className="flex items-center justify-center gap-2 mt-4 animate-fade-in">
+              <CheckCircle className="w-4 h-4 text-green-600 animate-pulse" />
+              <span className="text-sm text-muted-foreground">Google account connected</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className={isStacked ? "grid gap-6" : "grid gap-6 md:grid-cols-2 lg:grid-cols-3 max-w-6xl mx-auto"}>
         {topRowSections.map((section, index) => {
           const Icon = section.icon;
           const isArray = Array.isArray(section.content);
@@ -695,11 +702,18 @@ export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
                           <input
                             type="checkbox"
                             className="mt-1 h-4 w-4 accent-primary"
-                            checked={Boolean(taskCompleted[i])}
-                            onChange={() => setTaskCompleted(prev => ({ ...prev, [i]: !prev[i] }))}
+                            checked={typeof task.completed === 'boolean' ? task.completed : Boolean(taskCompleted[i])}
+                            onChange={() => {
+                              const nextValue = !(typeof task.completed === 'boolean' ? task.completed : Boolean(taskCompleted[i]));
+                              if (task.id && onTaskToggle) {
+                                onTaskToggle(task.id, nextValue);
+                                return;
+                              }
+                              setTaskCompleted(prev => ({ ...prev, [i]: !prev[i] }));
+                            }}
                           />
                           <div className="flex-1 space-y-1">
-                            <p className={`text-sm font-medium ${taskCompleted[i] ? 'line-through text-muted-foreground' : ''}`}>
+                            <p className={`text-sm font-medium ${(typeof task.completed === 'boolean' ? task.completed : taskCompleted[i]) ? 'line-through text-muted-foreground' : ''}`}>
                               {task.task}
                             </p>
                             {task.owner && (
@@ -1227,7 +1241,7 @@ export const ResultsDisplay = ({ results }: ResultsDisplayProps) => {
         })}
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2 max-w-4xl mx-auto">
+      <div className={isStacked ? "grid gap-6" : "grid gap-6 md:grid-cols-2 max-w-4xl mx-auto"}>
         {bottomRowSections.map((section, index) => {
           const Icon = section.icon;
           const isArray = Array.isArray(section.content);
