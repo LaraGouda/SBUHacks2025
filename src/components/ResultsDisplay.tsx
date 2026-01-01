@@ -1,6 +1,8 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { 
   FileText, 
   CheckSquare, 
@@ -8,6 +10,7 @@ import {
   Calendar, 
   AlertCircle,
   CheckCircle,
+  Check,
   Link as LinkIcon,
   X,
   Send,
@@ -17,7 +20,7 @@ import {
 import { useGoogleAuth } from "@/contexts/GoogleAuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { parseAnalysisResults, type TaskItem, type BlockerItem, type CalendarEvent, type EmailData, type SummaryData, type AnalysisResults } from "@/lib/parseAnalysisResults";
 
 interface ResultsDisplayProps {
@@ -29,9 +32,112 @@ interface ResultsDisplayProps {
     blockers?: any;
   };
   onTaskToggle?: (taskId: string, nextValue: boolean) => void;
+  onTaskDecline?: (taskId: string) => Promise<void> | void;
+  onBlockerResolve?: (blockerId: string, nextValue: boolean) => Promise<void> | void;
+  onBlockerDecline?: (blockerId: string) => Promise<void> | void;
+  onEmailDecline?: (emailId: string) => Promise<void> | void;
+  meetingTitle?: string;
+  meetingId?: string;
+  onMeetingTitleChange?: (nextTitle: string) => Promise<void> | void;
   layout?: "grid" | "stacked";
   showHeader?: boolean;
 }
+
+const isValidEmail = (value: string): boolean => {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+};
+
+const TIMEZONE_OPTIONS = [
+  "UTC",
+  "America/Los_Angeles",
+  "America/Denver",
+  "America/Chicago",
+  "America/New_York",
+  "America/Phoenix",
+  "America/Anchorage",
+  "Pacific/Honolulu",
+  "Europe/London",
+  "Europe/Paris",
+  "Europe/Berlin",
+  "Europe/Madrid",
+  "Europe/Rome",
+  "Europe/Amsterdam",
+  "Asia/Tokyo",
+  "Asia/Seoul",
+  "Asia/Hong_Kong",
+  "Asia/Singapore",
+  "Asia/Kolkata",
+  "Australia/Sydney",
+];
+
+type CalendarOverride = {
+  title?: string;
+  description?: string;
+  startTime?: string;
+  endTime?: string;
+  timezone?: string;
+  attendees?: string;
+};
+
+type CalendarMissingField = "title" | "description" | "startTime" | "endTime" | "timezone" | "attendees";
+
+const normalizeMissingField = (value: string): CalendarMissingField | null => {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized.includes("title") || normalized.includes("summary") || normalized.includes("subject")) {
+    return "title";
+  }
+  if (normalized.includes("description") || normalized.includes("details") || normalized.includes("agenda")) {
+    return "description";
+  }
+  if (normalized.includes("start") || normalized.includes("date") || normalized.includes("when")) {
+    return "startTime";
+  }
+  if (normalized.includes("end")) {
+    return "endTime";
+  }
+  if (normalized.includes("time zone") || normalized.includes("timezone") || normalized.includes("tz")) {
+    return "timezone";
+  }
+  if (
+    normalized.includes("attendee") ||
+    normalized.includes("invitee") ||
+    normalized.includes("participant") ||
+    normalized.includes("guest")
+  ) {
+    return "attendees";
+  }
+  return null;
+};
+
+const toDateTimeLocalValue = (value?: string): string => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const offset = date.getTimezoneOffset() * 60000;
+  const local = new Date(date.getTime() - offset);
+  return local.toISOString().slice(0, 16);
+};
+
+const getFunctionErrorMessage = async (error: any): Promise<string> => {
+  if (!error) return "Failed to create calendar event";
+  if (typeof error.message === "string" && error.message.length > 0) {
+    if (!("context" in error)) return error.message;
+  }
+  try {
+    const context = error?.context;
+    if (context) {
+      const payload = await context.json();
+      if (payload?.error) return String(payload.error);
+      if (payload?.message) return String(payload.message);
+    }
+  } catch {
+    // Fall through to generic message.
+  }
+  return typeof error.message === "string" && error.message.length > 0
+    ? error.message
+    : "Failed to create calendar event";
+};
 
 // Enhanced JSON parser that handles various formats and always returns readable text
 const parseContent = (content: any): any => {
@@ -307,16 +413,66 @@ const FormattedText = ({ text }: { text: string }) => {
   );
 };
 
-export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHeader = true }: ResultsDisplayProps) => {
-  const { isGoogleConnected, connectGoogle, accessToken, refreshToken } = useGoogleAuth();
+export const ResultsDisplay = ({
+  results,
+  onTaskToggle,
+  onTaskDecline,
+  onBlockerResolve,
+  onBlockerDecline,
+  onEmailDecline,
+  meetingTitle,
+  meetingId,
+  onMeetingTitleChange,
+  layout = "grid",
+  showHeader = true,
+}: ResultsDisplayProps) => {
+  const { isGoogleConnected, connectGoogle, disconnectGoogle, accessToken, refreshToken } = useGoogleAuth();
   const { toast } = useToast();
+  const defaultTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const timezoneOptions = TIMEZONE_OPTIONS.includes(defaultTimezone)
+    ? TIMEZONE_OPTIONS
+    : [defaultTimezone, ...TIMEZONE_OPTIONS];
   const [emailSending, setEmailSending] = useState<{ [key: number]: boolean }>({});
   const [emailApproved, setEmailApproved] = useState<{ [key: number]: boolean }>({});
   const [emailDeclined, setEmailDeclined] = useState<{ [key: number]: boolean }>({});
+  const [emailDeclining, setEmailDeclining] = useState<{ [key: number]: boolean }>({});
   const [calendarCreating, setCalendarCreating] = useState<{ [key: number]: boolean }>({});
   const [calendarApproved, setCalendarApproved] = useState<{ [key: number]: boolean }>({});
   const [calendarDeclined, setCalendarDeclined] = useState<{ [key: number]: boolean }>({});
-  const [taskCompleted, setTaskCompleted] = useState<{ [key: number]: boolean }>({});
+  const [calendarOverrides, setCalendarOverrides] = useState<{ [key: number]: CalendarOverride }>({});
+  const [taskCompleted, setTaskCompleted] = useState<{ [key: string]: boolean }>({});
+  const [taskDeclined, setTaskDeclined] = useState<{ [key: string]: boolean }>({});
+  const [taskDeclining, setTaskDeclining] = useState<{ [key: string]: boolean }>({});
+  const [blockerResolved, setBlockerResolved] = useState<{ [key: number]: boolean }>({});
+  const [blockerDeclined, setBlockerDeclined] = useState<{ [key: number]: boolean }>({});
+  const [blockerDeclining, setBlockerDeclining] = useState<{ [key: number]: boolean }>({});
+  const getPriorityClasses = (priority?: string) => {
+    if (!priority) {
+      return "border-muted-foreground/30 text-muted-foreground";
+    }
+    switch (priority.toLowerCase()) {
+      case "urgent":
+      case "critical":
+        return "border-red-900 bg-red-900 text-white";
+      case "high":
+        return "border-red-800 bg-red-700 text-white";
+      case "normal":
+      case "medium":
+        return "border-red-700 bg-red-600 text-white";
+      case "low":
+        return "border-red-300 bg-red-200 text-red-900";
+      default:
+        return "border-muted-foreground/30 text-muted-foreground";
+    }
+  };
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+
+  useEffect(() => {
+    if (!isEditingTitle) {
+      setTitleDraft(meetingTitle || "");
+    }
+  }, [meetingTitle, isEditingTitle]);
 
   // Use the centralized helper function to parse analysis results
   // This ensures consistent parsing across the app
@@ -337,6 +493,36 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
     return isParsed ? candidate : parseAnalysisResults(results);
   })();
 
+  const getMissingInfoList = (event: CalendarEvent): string[] => {
+    if (Array.isArray(event.missingInfo)) return event.missingInfo;
+    if (event.missingInfo) return [String(event.missingInfo)];
+    return [];
+  };
+
+  const getMissingCalendarFields = (event: CalendarEvent): Set<CalendarMissingField> => {
+    const missing = new Set<CalendarMissingField>();
+    const missingInfo = getMissingInfoList(event);
+    if (!event.title || !event.title.trim()) missing.add("title");
+    missing.add("startTime");
+    missing.add("endTime");
+    if (!event.timezone) missing.add("timezone");
+    missingInfo.forEach((item) => {
+      const mapped = normalizeMissingField(item);
+      if (mapped) missing.add(mapped);
+    });
+    return missing;
+  };
+
+  const updateCalendarOverride = (index: number, next: Partial<CalendarOverride>) => {
+    setCalendarOverrides(prev => ({
+      ...prev,
+      [index]: {
+        ...prev[index],
+        ...next,
+      },
+    }));
+  };
+
   const handleApproveEmail = async (emailData: EmailData, index: number) => {
     if (!isGoogleConnected || !accessToken) {
       toast({
@@ -347,7 +533,6 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
       return;
     }
 
-    setEmailApproved(prev => ({ ...prev, [index]: true }));
     setEmailSending(prev => ({ ...prev, [index]: true }));
     
     try {
@@ -370,45 +555,49 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
       const emailBody = emailData.body || '';
       const emailSubject = emailData.subject || 'Meeting Follow-up';
       const recipients = emailData.recipients || [];
-      const recipient = recipients.length > 0 ? recipients[0] : 'recipient@example.com';
+      const validRecipients = recipients.filter(isValidEmail);
+      const toHeader = validRecipients.join(', ');
+      const shouldCreateDraft = validRecipients.length > 0;
 
       console.log('Sending email with:', { recipients, subject: emailSubject, bodyLength: emailBody.length });
 
-      // Use direct fetch to the Supabase Functions endpoint so we can
-      // inspect raw status and body. This avoids generic client-side
-      // error messages and allows us to include all recipients.
-      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-      const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      if (shouldCreateDraft) {
+        // Use direct fetch to the Supabase Functions endpoint so we can
+        // inspect raw status and body. This avoids generic client-side
+        // error messages and allows us to include all recipients.
+        const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+        const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-      const functionsUrl = `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/send-gmail`;
+        const functionsUrl = `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/send-gmail`;
 
-      const resp = await fetch(functionsUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': SUPABASE_PUBLISHABLE_KEY || '',
-        },
-        body: JSON.stringify({
-          accessToken: tokenToUse,
-          // include all recipients so draft has CCs if present
-          to: Array.isArray(recipients) ? recipients.join(', ') : recipient,
-          subject: emailSubject,
-          body: emailBody,
-        }),
-      });
+        const resp = await fetch(functionsUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': SUPABASE_PUBLISHABLE_KEY || '',
+          },
+          body: JSON.stringify({
+            accessToken: tokenToUse,
+            // include only valid recipients to avoid Gmail draft errors
+            to: toHeader,
+            subject: emailSubject,
+            body: emailBody,
+          }),
+        });
 
-      let respBody: any = null;
-      try {
-        respBody = await resp.json();
-      } catch (err) {
-        respBody = { raw: await resp.text() };
-      }
+        let respBody: any = null;
+        try {
+          respBody = await resp.json();
+        } catch (err) {
+          respBody = { raw: await resp.text() };
+        }
 
-      console.log('send-gmail response status:', resp.status, respBody);
+        console.log('send-gmail response status:', resp.status, respBody);
 
-      if (!resp.ok) {
-        const message = respBody?.error || respBody?.message || `Edge function returned status ${resp.status}`;
-        throw new Error(typeof message === 'string' ? message : JSON.stringify(message));
+        if (!resp.ok) {
+          const message = respBody?.error || respBody?.message || `Edge function returned status ${resp.status}`;
+          throw new Error(typeof message === 'string' ? message : JSON.stringify(message));
+        }
       }
 
       // Success - open Gmail compose in a new tab with the same params
@@ -416,7 +605,9 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
         const mailParams = new URLSearchParams();
         mailParams.set('view', 'cm');
         mailParams.set('fs', '1');
-        mailParams.set('to', Array.isArray(recipients) ? recipients.join(',') : recipient);
+        if (toHeader) {
+          mailParams.set('to', toHeader);
+        }
         mailParams.set('su', emailSubject);
         mailParams.set('body', emailBody);
 
@@ -426,13 +617,20 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
         console.warn('Unable to open compose tab:', err);
       }
 
-      toast({
-        title: "Draft Saved",
-        description: "Email draft has been saved to your Gmail drafts folder!",
-      });
+      if (shouldCreateDraft) {
+        setEmailApproved(prev => ({ ...prev, [index]: true }));
+        toast({
+          title: "Draft Saved",
+          description: "Email draft has been saved to your Gmail drafts folder!",
+        });
+      } else {
+        toast({
+          title: "Draft Opened",
+          description: "No valid recipient found, so the Gmail draft opened without a To address.",
+        });
+      }
     } catch (error: any) {
       console.error('Error saving email draft:', error);
-      setEmailApproved(prev => ({ ...prev, [index]: false }));
 
       const msg = (error?.message || String(error || '')).toLowerCase();
 
@@ -455,11 +653,92 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
     }
   };
 
-  const handleDeclineEmail = (index: number) => {
-    setEmailDeclined(prev => ({ ...prev, [index]: true }));
+  const handleDeclineEmail = async (index: number, emailId?: string) => {
+    if (emailId && onEmailDecline) {
+      try {
+        await onEmailDecline(emailId);
+      } catch (error: any) {
+        toast({
+          title: "Failed to remove email",
+          description: error?.message || "Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+    setEmailDeclining(prev => ({ ...prev, [index]: true }));
+    window.setTimeout(() => {
+      setEmailDeclined(prev => ({ ...prev, [index]: true }));
+    }, 260);
     toast({
       title: "Email Declined",
       description: "Email draft has been declined.",
+    });
+  };
+
+  const handleDeclineTask = async (taskKey: string, taskId?: string) => {
+    if (taskId && onTaskDecline) {
+      try {
+        await onTaskDecline(taskId);
+      } catch (error: any) {
+        toast({
+          title: "Failed to remove task",
+          description: error?.message || "Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+    setTaskDeclining(prev => ({ ...prev, [taskKey]: true }));
+    window.setTimeout(() => {
+      setTaskDeclined(prev => ({ ...prev, [taskKey]: true }));
+    }, 260);
+    toast({
+      title: "Task Declined",
+      description: "Task has been declined.",
+    });
+  };
+
+  const handleResolveBlocker = async (index: number, blockerId?: string) => {
+    if (blockerId && onBlockerResolve) {
+      try {
+        await onBlockerResolve(blockerId, true);
+      } catch (error: any) {
+        toast({
+          title: "Failed to resolve blocker",
+          description: error?.message || "Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+    setBlockerResolved(prev => ({ ...prev, [index]: true }));
+    toast({
+      title: "Blocker Resolved",
+      description: "Blocker has been marked as resolved.",
+    });
+  };
+
+  const handleDeclineBlocker = async (index: number, blockerId?: string) => {
+    if (blockerId && onBlockerDecline) {
+      try {
+        await onBlockerDecline(blockerId);
+      } catch (error: any) {
+        toast({
+          title: "Failed to remove blocker",
+          description: error?.message || "Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+    setBlockerDeclining(prev => ({ ...prev, [index]: true }));
+    window.setTimeout(() => {
+      setBlockerDeclined(prev => ({ ...prev, [index]: true }));
+    }, 260);
+    toast({
+      title: "Blocker Declined",
+      description: "Blocker has been declined.",
     });
   };
 
@@ -473,7 +752,41 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
       return;
     }
 
-    setCalendarApproved(prev => ({ ...prev, [index]: true }));
+    const overrides = calendarOverrides[index] || {};
+    const missingFields = getMissingCalendarFields(event);
+    const title = (overrides.title ?? event.title ?? "").trim();
+    const description = (overrides.description ?? event.description ?? "Created from meeting analysis").trim();
+    const startInput = overrides.startTime;
+    const endInput = overrides.endTime;
+    const timezone = (overrides.timezone ?? event.timezone ?? defaultTimezone ?? "").trim();
+    const attendeesInput = overrides.attendees?.trim();
+    const attendees = attendeesInput
+      ? attendeesInput.split(",").map(value => value.trim()).filter(Boolean)
+      : event.attendees;
+    const startDate = startInput ? new Date(startInput) : null;
+    const endDate = endInput ? new Date(endInput) : null;
+    const missingDetails: string[] = [];
+
+    if (missingFields.has("title") && !title) missingDetails.push("title");
+    if (missingFields.has("description") && !description) missingDetails.push("description");
+    if (missingFields.has("startTime") && (!startInput || Number.isNaN(startDate?.getTime() ?? NaN))) {
+      missingDetails.push("start time");
+    }
+    if (missingFields.has("endTime") && (!endInput || Number.isNaN(endDate?.getTime() ?? NaN))) {
+      missingDetails.push("end time");
+    }
+    if (missingFields.has("timezone") && !timezone) missingDetails.push("timezone");
+    if (missingFields.has("attendees") && (!attendees || attendees.length === 0)) missingDetails.push("attendees");
+
+    if (missingDetails.length > 0) {
+      toast({
+        title: "Missing Details",
+        description: `Please add ${missingDetails.join(", ")} before creating the event.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
     setCalendarCreating(prev => ({ ...prev, [index]: true }));
     
     try {
@@ -493,43 +806,50 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
       }
 
       // Use structured calendar event data
-      const title = event.title || 'Meeting Follow-up';
-      const description = event.description || 'Created from meeting analysis';
-      
+      const safeTitle = title || 'Meeting Follow-up';
+      const safeDescription = description || 'Created from meeting analysis';
+
       // Parse start and end times, default to tomorrow if not specified
       let startTime: Date;
       let endTime: Date;
       
-      if (event.startTime) {
-        startTime = new Date(event.startTime);
+      if (startInput && !Number.isNaN(new Date(startInput).getTime())) {
+        startTime = new Date(startInput);
       } else {
         startTime = new Date(Date.now() + 24 * 60 * 60 * 1000); // Tomorrow
       }
       
-      if (event.endTime) {
-        endTime = new Date(event.endTime);
+      if (endInput && !Number.isNaN(new Date(endInput).getTime())) {
+        endTime = new Date(endInput);
       } else {
         endTime = new Date(startTime.getTime() + 60 * 60 * 1000); // 1 hour later
+      }
+      if (endTime <= startTime) {
+        throw new Error("End time must be after the start time.");
       }
 
       const { data, error } = await supabase.functions.invoke('create-calendar-event', {
         body: {
           accessToken: tokenToUse,
-          summary: title,
-          description: description,
+          summary: safeTitle,
+          description: safeDescription,
           startTime: startTime.toISOString(),
           endTime: endTime.toISOString(),
+          timezone: timezone || undefined,
+          attendees: attendees && attendees.length > 0 ? attendees : undefined,
         }
       });
 
       if (error) {
-        throw new Error(error.message || 'Failed to create calendar event');
+        const message = await getFunctionErrorMessage(error);
+        throw new Error(message);
       }
 
       if (data?.error) {
         throw new Error(data.error);
       }
 
+      setCalendarApproved(prev => ({ ...prev, [index]: true }));
       toast({
         title: "Event Created",
         description: "Calendar event has been created successfully!",
@@ -537,6 +857,15 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
     } catch (error: any) {
       console.error('Error creating calendar event:', error);
       setCalendarApproved(prev => ({ ...prev, [index]: false }));
+      if (error?.message?.toLowerCase?.().includes('insufficient authentication scopes')) {
+        disconnectGoogle();
+        toast({
+          title: "Reconnect Google",
+          description: "Calendar permission is missing. Please reconnect Google to grant calendar access.",
+          variant: "destructive",
+        });
+        return;
+      }
       toast({
         title: "Failed to Create",
         description: error.message || "Could not create calendar event. Please try again.",
@@ -545,6 +874,64 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
     } finally {
       setCalendarCreating(prev => ({ ...prev, [index]: false }));
     }
+  };
+
+  const beginTitleEdit = () => {
+    if (!meetingTitle) return;
+    setTitleDraft(meetingTitle);
+    setIsEditingTitle(true);
+  };
+
+  const cancelTitleEdit = () => {
+    setIsEditingTitle(false);
+    setTitleDraft(meetingTitle || "");
+  };
+
+  const commitTitleEdit = async () => {
+    if (!meetingTitle || !meetingId || !onMeetingTitleChange) {
+      cancelTitleEdit();
+      return;
+    }
+
+    const trimmed = titleDraft.trim();
+    if (!trimmed) {
+      toast({
+        title: "Invalid Title",
+        description: "Meeting title can't be empty.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      await onMeetingTitleChange(trimmed);
+      setIsEditingTitle(false);
+    } catch (error: any) {
+      console.error("Error updating meeting title:", error);
+      toast({
+        title: "Error",
+        description: error?.message || "Failed to update meeting title.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const priorityRank = (value?: string | null) => {
+    if (!value) return 0;
+    const normalized = value.toLowerCase();
+    if (normalized === "urgent" || normalized === "high") return 3;
+    if (normalized === "medium" || normalized === "normal") return 2;
+    if (normalized === "low") return 1;
+    return 0;
+  };
+
+  const blockerRank = (value?: string | null) => {
+    if (!value) return 0;
+    const normalized = value.toLowerCase();
+    if (normalized === "critical" || normalized === "high") return 3;
+    if (normalized === "medium") return 2;
+    if (normalized === "low") return 1;
+    return 0;
   };
 
   const handleDeclineCalendar = (index: number) => {
@@ -637,6 +1024,57 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
               <span className="text-sm text-muted-foreground">Google account connected</span>
             </div>
           )}
+          {meetingTitle && (
+            <div className="mt-5 flex flex-col items-center gap-2">
+              {isEditingTitle ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    value={titleDraft}
+                    onChange={(event) => setTitleDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        commitTitleEdit();
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        cancelTitleEdit();
+                      }
+                    }}
+                    className="min-w-[280px] bg-transparent border-b-2 border-border text-lg font-semibold focus:outline-none focus:border-primary text-center"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={commitTitleEdit}
+                    className="p-1 rounded hover:bg-muted"
+                  >
+                    <Check className="w-5 h-5 text-green-600" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={cancelTitleEdit}
+                    className="p-1 rounded hover:bg-muted"
+                  >
+                    <X className="w-5 h-5 text-muted-foreground" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-medium text-foreground">
+                    Meeting Title:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={beginTitleEdit}
+                    className="text-2xl font-semibold bg-gradient-primary bg-clip-text text-transparent hover:opacity-90"
+                  >
+                    {meetingTitle}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -696,24 +1134,47 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
                 ) : section.type === 'tasks' ? (
                   // Tasks Card - Display task, rationale, and priority
                   <ul className="space-y-3">
-                    {(section.content as TaskItem[]).map((task, i) => (
-                      <li key={i} className="p-3 rounded-lg border bg-muted/50 hover:bg-muted transition-colors">
-                        <div className="flex items-start gap-2">
-                          <input
-                            type="checkbox"
-                            className="mt-1 h-4 w-4 accent-primary"
-                            checked={typeof task.completed === 'boolean' ? task.completed : Boolean(taskCompleted[i])}
-                            onChange={() => {
-                              const nextValue = !(typeof task.completed === 'boolean' ? task.completed : Boolean(taskCompleted[i]));
+                    {[...(section.content as TaskItem[])]
+                      .sort((a, b) => priorityRank(b.priority) - priorityRank(a.priority))
+                      .map((task, i) => {
+                      const taskKey = task.id ?? `idx-${i}`;
+                      const isCompleted = typeof task.completed === 'boolean' ? task.completed : Boolean(taskCompleted[taskKey]);
+                      const isDeclined = Boolean(taskDeclined[taskKey]);
+                      const isDeclining = Boolean(taskDeclining[taskKey]);
+
+                      if (isDeclined) {
+                        return null;
+                      }
+
+                      return (
+                        <li
+                          key={taskKey}
+                          className={`p-3 rounded-lg border transition-all duration-300 ease-in-out overflow-hidden max-h-[400px] ${
+                            isDeclining ? 'opacity-0 scale-[0.98] max-h-0 py-0' :
+                            isCompleted ? 'bg-green-50 border-green-200' :
+                            'bg-muted/50 hover:bg-muted'
+                          }`}
+                        >
+                          <div className="flex items-start gap-2">
+                            <input
+                              type="checkbox"
+                              className="mt-1 h-4 w-4 accent-primary"
+                              checked={isCompleted}
+                              onChange={() => {
+                              if (isDeclining) {
+                                return;
+                              }
+                              const nextValue = !isCompleted;
                               if (task.id && onTaskToggle) {
                                 onTaskToggle(task.id, nextValue);
                                 return;
                               }
-                              setTaskCompleted(prev => ({ ...prev, [i]: !prev[i] }));
+                              setTaskCompleted(prev => ({ ...prev, [taskKey]: !prev[taskKey] }));
                             }}
+                            disabled={isDeclining}
                           />
                           <div className="flex-1 space-y-1">
-                            <p className={`text-sm font-medium ${(typeof task.completed === 'boolean' ? task.completed : taskCompleted[i]) ? 'line-through text-muted-foreground' : ''}`}>
+                            <p className={`text-sm font-medium ${isCompleted ? 'line-through text-muted-foreground' : ''}`}>
                               {task.task}
                             </p>
                             {task.owner && (
@@ -727,7 +1188,7 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
                               </p>
                             )}
                             {task.priority && (
-                              <Badge variant={task.priority === 'high' ? 'destructive' : task.priority === 'medium' ? 'default' : 'secondary'} className="text-xs">
+                              <Badge variant="outline" className={`text-xs ${getPriorityClasses(task.priority)}`}>
                                 {task.priority} priority
                               </Badge>
                             )}
@@ -737,9 +1198,20 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
                               </p>
                             )}
                           </div>
+                          {!isCompleted && !isDeclining && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleDeclineTask(taskKey, task.id)}
+                              className="h-7 px-2 hover:bg-red-50 hover:border-red-300"
+                            >
+                              <X className="w-3 h-3 text-red-600" />
+                            </Button>
+                          )}
                         </div>
                       </li>
-                    ))}
+                      );
+                    })}
                   </ul>
                 ) : section.type === 'email' ? (
                   // Email Card - Display reason, recipients, subject, body, and references
@@ -748,9 +1220,19 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
                       const isSending = emailSending[i];
                       const isApproved = emailApproved[i];
                       const isDeclined = emailDeclined[i];
+                      const isDeclining = emailDeclining[i];
+
+                      if (isDeclined) {
+                        return null;
+                      }
 
                       return (
-                        <div key={i} className="space-y-3 border rounded-lg p-3 bg-muted/30">
+                        <div
+                          key={i}
+                          className={`space-y-3 border rounded-lg p-3 bg-muted/30 transition-all duration-300 ease-in-out overflow-hidden max-h-[800px] ${
+                            isDeclining ? 'opacity-0 scale-[0.98] max-h-0 py-0' : ''
+                          }`}
+                        >
                           {email.reason && (
                             <div className="p-2 rounded bg-muted/50">
                               <p className="text-xs font-semibold text-muted-foreground mb-1">Reason:</p>
@@ -784,7 +1266,7 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
                               </ul>
                             </div>
                           )}
-                          {!isApproved && !isDeclined && (
+                          {!isApproved && !isDeclining && (
                             <div className="flex gap-2 mt-2">
                               <Button
                                 onClick={() => handleApproveEmail(email, i)}
@@ -804,10 +1286,10 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
                                 )}
                               </Button>
                               <Button
-                                onClick={() => handleDeclineEmail(i)}
+                                onClick={() => handleDeclineEmail(i, email.id)}
                                 disabled={isSending}
                                 variant="outline"
-                                className="flex-1"
+                                className="flex-1 hover:bg-red-50 hover:border-red-300"
                               >
                                 <X className="w-4 h-4 mr-2" />
                                 Decline
@@ -818,12 +1300,6 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
                             <Badge variant="outline" className="bg-green-100 text-green-700 border-green-300 mt-2">
                               <CheckCircle className="w-4 h-4 mr-1" />
                               Draft Saved
-                            </Badge>
-                          )}
-                          {isDeclined && (
-                            <Badge variant="outline" className="bg-red-100 text-red-700 border-red-300 mt-2">
-                              <X className="w-4 h-4 mr-1" />
-                              Email Declined
                             </Badge>
                           )}
                         </div>
@@ -1211,7 +1687,7 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
                           )}
                         </Button>
                         <Button
-                          onClick={handleDeclineEmail}
+                          onClick={() => handleDeclineEmail(0)}
                           disabled={emailSending || !isGoogleConnected}
                           variant="outline"
                           className="flex-1 hover:bg-red-50 hover:border-red-300"
@@ -1265,8 +1741,26 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
                   <p className="text-sm text-muted-foreground italic">No content available</p>
                 ) : section.type === 'blockers' ? (
                   <ul className="space-y-3">
-                    {(section.content as BlockerItem[]).map((blocker, i) => (
-                      <li key={i} className="p-3 rounded-lg border border-destructive/20 bg-destructive/5 hover:bg-destructive/10 transition-colors">
+                    {[...(section.content as BlockerItem[])]
+                      .sort((a, b) => blockerRank(b.severity) - blockerRank(a.severity))
+                      .map((blocker, i) => {
+                      const isResolved = Boolean(blocker.resolved) || Boolean(blockerResolved[i]);
+                      const isDeclined = Boolean(blockerDeclined[i]);
+                      const isDeclining = Boolean(blockerDeclining[i]);
+
+                      if (isDeclined) {
+                        return null;
+                      }
+
+                      return (
+                        <li
+                          key={i}
+                          className={`p-3 rounded-lg border transition-all duration-300 ease-in-out overflow-hidden max-h-[800px] ${
+                            isDeclining ? 'opacity-0 scale-[0.98] max-h-0 py-0' :
+                            isResolved ? 'bg-green-50 border-green-200' :
+                            'border-destructive/20 bg-destructive/5 hover:bg-destructive/10'
+                          }`}
+                        >
                         <div className="flex items-start gap-2">
                           <Badge variant="destructive" className="mt-0.5 shrink-0">
                             {i + 1}
@@ -1279,7 +1773,7 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
                                 </Badge>
                               )}
                               {blocker.severity && (
-                                <Badge variant={blocker.severity === 'high' ? 'destructive' : blocker.severity === 'medium' ? 'default' : 'secondary'} className="text-xs">
+                                <Badge variant="outline" className={`text-xs ${getPriorityClasses(blocker.severity)}`}>
                                   {blocker.severity} severity
                                 </Badge>
                               )}
@@ -1321,9 +1815,36 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
                               </p>
                             )}
                           </div>
+                          {!isResolved && !isDeclining && (
+                            <div className="flex gap-1 shrink-0">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleResolveBlocker(i, blocker.id)}
+                                className="h-7 px-2 hover:bg-green-50 hover:border-green-300"
+                              >
+                                <CheckCircle className="w-3 h-3 text-green-600" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleDeclineBlocker(i, blocker.id)}
+                                className="h-7 px-2 hover:bg-red-50 hover:border-red-300"
+                              >
+                                <X className="w-3 h-3 text-red-600" />
+                              </Button>
+                            </div>
+                          )}
+                          {isResolved && (
+                            <Badge variant="outline" className="bg-green-100 text-green-700 border-green-300">
+                              <CheckCircle className="w-3 h-3 mr-1" />
+                              Resolved
+                            </Badge>
+                          )}
                         </div>
                       </li>
-                    ))}
+                      );
+                    })}
                   </ul>
                 ) : section.type === 'calendar' ? (
                   <ul className="space-y-3">
@@ -1331,8 +1852,13 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
                       const isApproved = calendarApproved[i];
                       const isDeclined = calendarDeclined[i];
                       const isCreating = calendarCreating[i];
-                      const needsResolve = Boolean(event.missingInfo && event.missingInfo.length > 0);
+                      const missingFields = getMissingCalendarFields(event);
+                      const needsResolve = missingFields.size > 0;
                       const showStatus = Boolean(event.status && !event.status.toLowerCase().includes('pending'));
+                      const overrides = calendarOverrides[i] || {};
+                      const missingInfoList = getMissingInfoList(event);
+                      const displayStartTime = overrides.startTime;
+                      const displayEndTime = overrides.endTime;
                       
                       return (
                         <li 
@@ -1353,14 +1879,14 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
                                 <p className="text-xs text-muted-foreground">{event.description}</p>
                               )}
                               <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                                {event.startTime && (
+                                {displayStartTime && (
                                   <span>
-                                    <span className="font-semibold">Start:</span> {new Date(event.startTime).toLocaleString()}
+                                    <span className="font-semibold">Start:</span> {new Date(displayStartTime).toLocaleString()}
                                   </span>
                                 )}
-                                {event.endTime && (
+                                {displayEndTime && (
                                   <span>
-                                    <span className="font-semibold">End:</span> {new Date(event.endTime).toLocaleString()}
+                                    <span className="font-semibold">End:</span> {new Date(displayEndTime).toLocaleString()}
                                   </span>
                                 )}
                                 {event.timezone && (
@@ -1379,9 +1905,116 @@ export const ResultsDisplay = ({ results, onTaskToggle, layout = "grid", showHea
                                   <span className="font-semibold">Refs:</span> {event.references.join(', ')}
                                 </div>
                               )}
-                              {event.missingInfo && event.missingInfo.length > 0 && (
+                              {missingInfoList.length > 0 && (
                                 <div className="text-xs text-muted-foreground">
-                                  <span className="font-semibold">Missing:</span> {event.missingInfo.join(', ')}
+                                  <span className="font-semibold">Missing:</span> {missingInfoList.join(', ')}
+                                </div>
+                              )}
+                              {missingFields.size > 0 && !isApproved && !isDeclined && (
+                                <div className="space-y-2 rounded-md border border-dashed border-muted-foreground/40 bg-background/70 p-2">
+                                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                    Missing details
+                                  </p>
+                                  {missingFields.has("title") && (
+                                    <div className="space-y-1">
+                                      <label className="text-[11px] font-medium text-muted-foreground">Title</label>
+                                      <Input
+                                        value={overrides.title ?? event.title ?? ""}
+                                        onChange={(e) => updateCalendarOverride(i, { title: e.target.value })}
+                                        placeholder="Event title"
+                                        className="h-8 text-xs"
+                                      />
+                                    </div>
+                                  )}
+                                  {missingFields.has("description") && (
+                                    <div className="space-y-1">
+                                      <label className="text-[11px] font-medium text-muted-foreground">Description</label>
+                                      <Textarea
+                                        value={overrides.description ?? event.description ?? ""}
+                                        onChange={(e) => updateCalendarOverride(i, { description: e.target.value })}
+                                        placeholder="Optional details or agenda"
+                                        className="min-h-[60px] text-xs"
+                                      />
+                                    </div>
+                                  )}
+                                  {missingFields.has("startTime") && (
+                                    <div className="space-y-1">
+                                      <label className="text-[11px] font-medium text-muted-foreground">Start</label>
+                                      <Input
+                                        type="datetime-local"
+                                        value={overrides.startTime ?? ""}
+                                        onChange={(e) => updateCalendarOverride(i, { startTime: e.target.value })}
+                                        className="h-8 text-xs"
+                                      />
+                                    </div>
+                                  )}
+                                  {missingFields.has("endTime") && (
+                                    <div className="space-y-1">
+                                      <label className="text-[11px] font-medium text-muted-foreground">End</label>
+                                      <div className="flex flex-wrap gap-2">
+                                          {[
+                                            { label: "+15 min", minutes: 15 },
+                                            { label: "+30 min", minutes: 30 },
+                                            { label: "+2 hours", minutes: 120 },
+                                          ].map((option) => {
+                                            const base = overrides.startTime;
+                                            const disabled = !base || Number.isNaN(new Date(base).getTime());
+                                            return (
+                                              <button
+                                                key={option.label}
+                                                type="button"
+                                                disabled={disabled}
+                                                onClick={() => {
+                                                  if (!base) return;
+                                                  const next = new Date(base);
+                                                  if (Number.isNaN(next.getTime())) return;
+                                                  next.setMinutes(next.getMinutes() + option.minutes);
+                                                  updateCalendarOverride(i, { endTime: toDateTimeLocalValue(next.toISOString()) });
+                                                }}
+                                                className="rounded-md border border-muted-foreground/30 px-2 py-1 text-[11px] text-muted-foreground transition hover:border-muted-foreground/60 hover:text-foreground disabled:opacity-50"
+                                              >
+                                                {option.label}
+                                              </button>
+                                            );
+                                          })}
+                                      </div>
+                                      <Input
+                                        type="datetime-local"
+                                        value={overrides.endTime ?? ""}
+                                        onChange={(e) => updateCalendarOverride(i, { endTime: e.target.value })}
+                                        className="h-8 text-xs"
+                                      />
+                                    </div>
+                                  )}
+                                  {missingFields.has("timezone") && (
+                                    <div className="space-y-1">
+                                      <label className="text-[11px] font-medium text-muted-foreground">Timezone</label>
+                                      <div className="relative">
+                                        <select
+                                          value={overrides.timezone ?? event.timezone ?? defaultTimezone}
+                                          onChange={(e) => updateCalendarOverride(i, { timezone: e.target.value })}
+                                          className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                        >
+                                          {timezoneOptions.map((tz) => (
+                                            <option key={tz} value={tz}>
+                                              {tz}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </div>
+                                    </div>
+                                  )}
+                                  {missingFields.has("attendees") && (
+                                    <div className="space-y-1">
+                                      <label className="text-[11px] font-medium text-muted-foreground">Attendees</label>
+                                      <Input
+                                        value={overrides.attendees ?? (event.attendees ? event.attendees.join(", ") : "")}
+                                        onChange={(e) => updateCalendarOverride(i, { attendees: e.target.value })}
+                                        placeholder="name@example.com, other@example.com"
+                                        className="h-8 text-xs"
+                                      />
+                                    </div>
+                                  )}
                                 </div>
                               )}
                               {showStatus && (

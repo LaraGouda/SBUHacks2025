@@ -64,33 +64,7 @@ export const GoogleAuthProvider = ({ children }: { children: React.ReactNode }) 
     // Check if we have a Google access token from OAuth or localStorage
     const checkGoogleSession = async () => {
       try {
-        // First check localStorage for stored token
-        const storedToken = localStorage.getItem('google_access_token');
-        if (storedToken) {
-          // Verify token is still valid by checking if it's expired
-          const tokenExpiry = localStorage.getItem('google_token_expiry');
-          if (tokenExpiry && new Date(tokenExpiry) > new Date()) {
-            setAccessToken(storedToken);
-            setIsGoogleConnected(true);
-            return;
-          } else {
-            // Token expired, try to refresh it
-            const refreshTokenValue = localStorage.getItem('google_refresh_token');
-            if (refreshTokenValue) {
-              // Try to refresh the token
-              const refreshed = await refreshToken();
-              if (refreshed) {
-                return;
-              }
-            }
-            // If refresh failed, remove expired tokens
-            localStorage.removeItem('google_access_token');
-            localStorage.removeItem('google_token_expiry');
-            localStorage.removeItem('google_refresh_token');
-          }
-        }
-
-        // Then check Supabase session
+        // Prefer Supabase session provider token (may include newer scopes)
         const { data: { session }, error } = await supabase.auth.getSession();
         
         if (error) {
@@ -127,6 +101,33 @@ export const GoogleAuthProvider = ({ children }: { children: React.ReactNode }) 
         } else {
           setIsGoogleConnected(false);
           setAccessToken(null);
+        }
+
+        if (session?.provider_token) {
+          return;
+        }
+
+        // Fallback to localStorage for stored token
+        const storedToken = localStorage.getItem('google_access_token');
+        if (storedToken) {
+          const tokenExpiry = localStorage.getItem('google_token_expiry');
+          if (tokenExpiry && new Date(tokenExpiry) > new Date()) {
+            setAccessToken(storedToken);
+            setIsGoogleConnected(true);
+            return;
+          }
+
+          const refreshTokenValue = localStorage.getItem('google_refresh_token');
+          if (refreshTokenValue) {
+            const refreshed = await refreshToken();
+            if (refreshed) {
+              return;
+            }
+          }
+
+          localStorage.removeItem('google_access_token');
+          localStorage.removeItem('google_token_expiry');
+          localStorage.removeItem('google_refresh_token');
         }
       } catch (error) {
         console.error('Error checking Google session:', error);
@@ -224,7 +225,8 @@ export const GoogleAuthProvider = ({ children }: { children: React.ReactNode }) 
             'profile',
             'https://www.googleapis.com/auth/gmail.compose',
             'https://www.googleapis.com/auth/gmail.insert',
-            'https://www.googleapis.com/auth/gmail.send'
+            'https://www.googleapis.com/auth/gmail.send',
+            'https://www.googleapis.com/auth/calendar.events'
           ].join(' '),
           queryParams: {
             access_type: 'offline',

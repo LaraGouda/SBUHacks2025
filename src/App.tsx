@@ -12,6 +12,7 @@ import Auth from "./pages/Auth";
 import Meetings from "./pages/Meetings";
 import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
+import DashboardPage from "./pages/DashboardPage";
 
 const queryClient = new QueryClient();
 
@@ -29,6 +30,14 @@ const App = () => {
                 <Route
                   path="/"
                   element={<Index />}
+                />
+                <Route
+                  path="/dashboard"
+                  element={
+                    <ProtectedRoute>
+                      <DashboardPage />
+                    </ProtectedRoute>
+                  }
                 />
                 <Route
                   path="/meetings"

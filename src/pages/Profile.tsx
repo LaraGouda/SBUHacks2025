@@ -4,8 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, Mail, Calendar, CheckCircle, XCircle, User } from "lucide-react";
+import { Mail, Calendar, CheckCircle, XCircle, User } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { AppHeader } from "@/components/AppHeader";
 
 export default function Profile() {
   const { user, signOut } = useAuth();
@@ -19,18 +20,7 @@ export default function Profile() {
 
   return (
     <div className="min-h-screen bg-gradient-subtle">
-      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <img src="/logo.png" alt="FollowUp" className="w-10 h-10" />
-            <span className="text-xl font-bold text-foreground">FollowUp</span>
-          </div>
-          <Button variant="ghost" onClick={() => navigate("/")}>
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Home
-          </Button>
-        </div>
-      </header>
+      <AppHeader showBack />
 
       <main className="container mx-auto px-4 py-12 max-w-4xl">
         <div className="space-y-6">

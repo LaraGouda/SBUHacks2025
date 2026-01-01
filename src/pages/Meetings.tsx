@@ -1,59 +1,18 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Calendar, CheckCircle2, Check, Clock, Trash2, X } from "lucide-react";
+import { Calendar, CheckCircle2, Check, Clock, Trash2, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import { ResultsDisplay } from "@/components/ResultsDisplay";
 import { useAuth } from "@/contexts/AuthContext";
-import { parseAnalysisResults, type AnalysisResults } from "@/lib/parseAnalysisResults";
+import { parseAnalysisResults } from "@/lib/parseAnalysisResults";
+import { buildResultsFromMeeting, type MeetingWithRelations } from "@/lib/buildResultsFromMeeting";
+import { AppHeader } from "@/components/AppHeader";
 
-interface Task {
-  id: string;
-  description: string;
-  completed: boolean;
-}
-
-interface EmailDraft {
-  id: string;
-  subject: string | null;
-  body: string;
-  recipient: string | null;
-  status: string | null;
-}
-
-interface CalendarEvent {
-  id: string;
-  title: string;
-  description: string | null;
-  start_time: string;
-  end_time: string;
-  timezone: string | null;
-  status: string | null;
-}
-
-interface Blocker {
-  id: string;
-  description: string;
-  severity: string | null;
-  resolved: boolean;
-}
-
-interface Meeting {
-  id: string;
-  title: string;
-  transcript: string;
-  summary: string | null;
-  status: "pending" | "analyzing" | "analyzed" | "failed" | "resolved";
-  created_at: string;
-  tasks: Task[];
-  email_drafts: EmailDraft[];
-  calendar_events: CalendarEvent[];
-  blockers: Blocker[];
-}
+type Meeting = MeetingWithRelations;
 
 export default function Meetings() {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -61,7 +20,6 @@ export default function Meetings() {
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
   const [editingMeetingId, setEditingMeetingId] = useState<string | null>(null);
   const [titleDraft, setTitleDraft] = useState("");
-  const navigate = useNavigate();
   const { toast } = useToast();
   const { user } = useAuth();
 
@@ -78,9 +36,10 @@ export default function Meetings() {
           title,
           transcript,
           summary,
+          raw_analysis,
           status,
           created_at,
-          tasks (id, description, completed),
+          tasks (id, description, completed, priority),
           email_drafts (id, subject, body, recipient, status),
           calendar_events (id, title, description, start_time, end_time, timezone, status),
           blockers (id, description, severity, resolved)
@@ -186,6 +145,181 @@ export default function Meetings() {
     }
   };
 
+  const declineTask = async (taskId: string) => {
+    if (!user || !selectedMeeting) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('tasks')
+        .delete()
+        .eq('id', taskId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      setMeetings(prev =>
+        prev.map(meeting => {
+          if (meeting.id !== selectedMeeting.id) return meeting;
+          return {
+            ...meeting,
+            tasks: meeting.tasks.filter(task => task.id !== taskId),
+          };
+        })
+      );
+
+      setSelectedMeeting(prev => {
+        if (!prev || prev.id !== selectedMeeting.id) return prev;
+        return {
+          ...prev,
+          tasks: prev.tasks.filter(task => task.id !== taskId),
+        };
+      });
+    } catch (error: any) {
+      console.error('Error deleting task:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete task.",
+        variant: "destructive",
+      });
+      throw error;
+    }
+  };
+
+  const resolveBlocker = async (blockerId: string, nextValue: boolean) => {
+    if (!user || !selectedMeeting) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('blockers')
+        .update({
+          resolved: nextValue,
+          resolved_at: nextValue ? new Date().toISOString() : null,
+        })
+        .eq('id', blockerId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      setMeetings(prev =>
+        prev.map(meeting => {
+          if (meeting.id !== selectedMeeting.id) return meeting;
+          return {
+            ...meeting,
+            blockers: meeting.blockers.map(blocker =>
+              blocker.id === blockerId ? { ...blocker, resolved: nextValue } : blocker
+            ),
+          };
+        })
+      );
+
+      setSelectedMeeting(prev => {
+        if (!prev || prev.id !== selectedMeeting.id) return prev;
+        return {
+          ...prev,
+          blockers: prev.blockers.map(blocker =>
+            blocker.id === blockerId ? { ...blocker, resolved: nextValue } : blocker
+          ),
+        };
+      });
+    } catch (error: any) {
+      console.error('Error updating blocker:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update blocker.",
+        variant: "destructive",
+      });
+      throw error;
+    }
+  };
+
+  const declineBlocker = async (blockerId: string) => {
+    if (!user || !selectedMeeting) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('blockers')
+        .delete()
+        .eq('id', blockerId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      setMeetings(prev =>
+        prev.map(meeting => {
+          if (meeting.id !== selectedMeeting.id) return meeting;
+          return {
+            ...meeting,
+            blockers: meeting.blockers.filter(blocker => blocker.id !== blockerId),
+          };
+        })
+      );
+
+      setSelectedMeeting(prev => {
+        if (!prev || prev.id !== selectedMeeting.id) return prev;
+        return {
+          ...prev,
+          blockers: prev.blockers.filter(blocker => blocker.id !== blockerId),
+        };
+      });
+    } catch (error: any) {
+      console.error('Error deleting blocker:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete blocker.",
+        variant: "destructive",
+      });
+      throw error;
+    }
+  };
+
+  const declineEmail = async (emailId: string) => {
+    if (!user || !selectedMeeting) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('email_drafts')
+        .delete()
+        .eq('id', emailId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      setMeetings(prev =>
+        prev.map(meeting => {
+          if (meeting.id !== selectedMeeting.id) return meeting;
+          return {
+            ...meeting,
+            email_drafts: meeting.email_drafts.filter(draft => draft.id !== emailId),
+          };
+        })
+      );
+
+      setSelectedMeeting(prev => {
+        if (!prev || prev.id !== selectedMeeting.id) return prev;
+        return {
+          ...prev,
+          email_drafts: prev.email_drafts.filter(draft => draft.id !== emailId),
+        };
+      });
+    } catch (error: any) {
+      console.error('Error deleting email draft:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete email draft.",
+        variant: "destructive",
+      });
+      throw error;
+    }
+  };
+
   const toggleResolved = async () => {
     if (!user || !selectedMeeting) {
       return;
@@ -224,67 +358,6 @@ export default function Meetings() {
         variant: "destructive",
       });
     }
-  };
-
-  const buildResultsFromMeeting = (meeting: Meeting): AnalysisResults => {
-    const parsedSummary = parseAnalysisResults({ summary: meeting.summary }).summary;
-    const parsedEmails = parseAnalysisResults({
-      email: meeting.email_drafts?.map(draft => draft.body) || [],
-    }).email;
-    const parsedBlockers = parseAnalysisResults({
-      blockers: meeting.blockers?.map(blocker => blocker.description) || [],
-    }).blockers;
-
-    const parsedTasks = parseAnalysisResults({
-      nextTasks: meeting.tasks?.map(task => task.description) || [],
-    }).nextTasks;
-
-    const calendarRows = meeting.calendar_events || [];
-    const looksLikeCalendarJsonFragment = (value: string) => {
-      const trimmed = value.trim();
-      if (!trimmed) return false;
-      return (
-        trimmed.startsWith("{") ||
-        trimmed.startsWith("}") ||
-        trimmed.startsWith("[") ||
-        trimmed.startsWith("\"") ||
-        /"(title|description|start|end|timezone|attendees|status|suggestedEvents|events|missing_info|references)"\s*:/.test(trimmed)
-      );
-    };
-    const hasCalendarFragments = calendarRows.some(row =>
-      looksLikeCalendarJsonFragment(row.title || "") ||
-      looksLikeCalendarJsonFragment(row.description || "")
-    );
-    const parsedCalendar = hasCalendarFragments
-      ? parseAnalysisResults({
-          calendar: calendarRows
-            .map(row => [row.title, row.description].filter(Boolean).join("\n"))
-            .join("\n"),
-        }).calendar
-      : parseAnalysisResults({ calendar: calendarRows }).calendar;
-
-    return {
-      summary: parsedSummary,
-      nextTasks: parsedTasks.map((task, index) => ({
-        ...task,
-        id: meeting.tasks?.[index]?.id,
-        completed: meeting.tasks?.[index]?.completed,
-      })).filter(task => task.task && task.task.trim()),
-      email: parsedEmails.map((email, index) => ({
-        ...email,
-        subject: email.subject || meeting.email_drafts?.[index]?.subject || "Meeting Follow-up",
-        recipients: email.recipients && email.recipients.length > 0
-          ? email.recipients
-          : meeting.email_drafts?.[index]?.recipient
-            ? [meeting.email_drafts[index].recipient as string]
-            : [],
-      })),
-      calendar: parsedCalendar.filter(event => event.title && event.title.trim()),
-      blockers: parsedBlockers.map((blocker, index) => ({
-        ...blocker,
-        severity: blocker.severity || meeting.blockers?.[index]?.severity || undefined,
-      })),
-    };
   };
 
   const beginTitleEdit = (meeting: Meeting) => {
@@ -361,18 +434,7 @@ export default function Meetings() {
 
   return (
     <div className="min-h-screen bg-gradient-subtle">
-      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <img src="/logo.png" alt="FollowUp" className="w-10 h-10" />
-            <span className="text-xl font-bold text-foreground">Meeting History</span>
-          </div>
-          <Button variant="outline" onClick={() => navigate("/")}>
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Home
-          </Button>
-        </div>
-      </header>
+      <AppHeader showBack />
 
       <main className="container mx-auto px-4 py-12">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -453,7 +515,7 @@ export default function Meetings() {
                         </button>
                       )}
                       {isResolved && (
-                        <Badge variant="secondary" className="text-xs">
+                        <Badge variant="outline" className="text-xs bg-green-100 text-green-700 border-green-200">
                           Resolved
                         </Badge>
                       )}
@@ -525,7 +587,7 @@ export default function Meetings() {
                           </button>
                         )}
                         {selectedMeeting.status === 'resolved' && (
-                          <Badge variant="secondary" className="text-xs">
+                          <Badge variant="outline" className="text-xs bg-green-100 text-green-700 border-green-200">
                             Resolved
                           </Badge>
                         )}
@@ -559,6 +621,10 @@ export default function Meetings() {
                 <ResultsDisplay
                   results={buildResultsFromMeeting(selectedMeeting)}
                   onTaskToggle={toggleTaskCompleted}
+                  onTaskDecline={declineTask}
+                  onBlockerResolve={resolveBlocker}
+                  onBlockerDecline={declineBlocker}
+                  onEmailDecline={declineEmail}
                   layout="stacked"
                   showHeader={false}
                 />

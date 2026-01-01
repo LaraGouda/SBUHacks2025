@@ -15,12 +15,14 @@ export interface TaskItem {
 }
 
 export interface BlockerItem {
+  id?: string;
   type?: string;
   title?: string;
   description: string;
   quote?: string;
   timestamp?: string;
   severity?: string;
+  resolved?: boolean;
   impact?: string | null;
   references?: string[];
   evidenceQuotes?: string[];
@@ -40,6 +42,7 @@ export interface CalendarEvent {
 }
 
 export interface EmailData {
+  id?: string;
   reason?: string;
   recipients?: string[];
   subject?: string;
@@ -706,12 +709,13 @@ const formatReference = (ref: any): string => {
   return String(ref);
 };
 
-const parseEmails = (value: any): EmailData[] => {
+const parseEmails = (value: any, depth = 0): EmailData[] => {
   if (!value) return [];
+  if (depth > 6) return [];
 
   const parsedFromArray = tryParseJsonFromArray(value);
   if (parsedFromArray) {
-    return parseEmails(parsedFromArray);
+    return parseEmails(parsedFromArray, depth + 1);
   }
   
   // If value is a string with multiple JSON objects (multiple email drafts), take the first one
@@ -724,7 +728,7 @@ const parseEmails = (value: any): EmailData[] => {
         const firstJson = jsonMatches[0];
         const cleaned = stripMarkdown(firstJson);
         const parsed = JSON.parse(cleaned);
-        return parseEmails(parsed);
+        return parseEmails(parsed, depth + 1);
       } catch {
         // Continue to other parsing methods
       }
@@ -732,13 +736,13 @@ const parseEmails = (value: any): EmailData[] => {
 
     const parsedJson = tryParseJson(value);
     if (parsedJson) {
-      return parseEmails(parsedJson);
+      return parseEmails(parsedJson, depth + 1);
     }
   }
   
   // If it's an array of email drafts, take the first one
   if (Array.isArray(value) && value.length > 0) {
-    return value.map((item: any) => parseEmails(item)).flat();
+    return value.map((item: any) => parseEmails(item, depth + 1)).flat();
   }
   
   // If it's already an EmailData object, return as-is
@@ -779,7 +783,7 @@ const parseEmails = (value: any): EmailData[] => {
     
     const parsedJson = tryParseJson(valueStr);
     if (parsedJson) {
-      return parseEmails(parsedJson);
+      return parseEmails(parsedJson, depth + 1);
     }
     
     // If it's just a plain string, treat it as the body
@@ -788,7 +792,7 @@ const parseEmails = (value: any): EmailData[] => {
   
   // If it's an object, extract fields
   if (typeof value === 'object' && value !== null) {
-    return parseEmails(value);
+    return parseEmails(value, depth + 1);
   }
   
   return [{ body: String(value) }];

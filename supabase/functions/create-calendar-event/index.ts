@@ -12,7 +12,7 @@ serve(async (req) => {
   }
 
   try {
-    const { accessToken, summary, description, startTime, endTime } = await req.json();
+    const { accessToken, summary, description, startTime, endTime, timezone, attendees, location } = await req.json();
 
     if (!accessToken || !summary) {
       return new Response(
@@ -21,18 +21,31 @@ serve(async (req) => {
       );
     }
 
-    const event = {
+    const event: Record<string, unknown> = {
       summary,
       description: description || '',
       start: {
         dateTime: startTime || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        timeZone: timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
       },
       end: {
         dateTime: endTime || new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString(),
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        timeZone: timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
       },
     };
+
+    if (location && typeof location === 'string' && location.trim()) {
+      event.location = location.trim();
+    }
+
+    if (Array.isArray(attendees)) {
+      const attendeeList = attendees
+        .map((item) => (typeof item === 'string' ? item.trim() : ''))
+        .filter(Boolean);
+      if (attendeeList.length > 0) {
+        event.attendees = attendeeList.map((email) => ({ email }));
+      }
+    }
 
     const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
       method: 'POST',
