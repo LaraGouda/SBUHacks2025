@@ -22,7 +22,6 @@ export const GoogleAuthProvider = ({ children }: { children: React.ReactNode }) 
     try {
       const refreshTokenValue = localStorage.getItem('google_refresh_token');
       if (!refreshTokenValue) {
-        console.log('No refresh token available');
         return false;
       }
 
@@ -74,7 +73,6 @@ export const GoogleAuthProvider = ({ children }: { children: React.ReactNode }) 
         
         // Check for provider_token from Supabase OAuth
         if (session?.provider_token) {
-          console.log('Found provider token from Supabase OAuth');
           setAccessToken(session.provider_token);
           setIsGoogleConnected(true);
           localStorage.setItem('google_access_token', session.provider_token);
@@ -90,7 +88,6 @@ export const GoogleAuthProvider = ({ children }: { children: React.ReactNode }) 
           if (provider === 'google') {
             // User signed in with Google but no provider_token
             // This might happen if scopes weren't requested properly
-            console.log('User signed in with Google but no provider token available');
             setIsGoogleConnected(false);
             setAccessToken(null);
           } else {
@@ -140,7 +137,6 @@ export const GoogleAuthProvider = ({ children }: { children: React.ReactNode }) 
 
     // Listen for auth state changes to capture OAuth tokens
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth state changed:', event, 'Provider token:', session?.provider_token);
       
       // With Supabase's built-in OAuth, the provider_token contains the Google access token
       if (session?.provider_token) {
