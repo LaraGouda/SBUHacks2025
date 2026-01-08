@@ -7,6 +7,7 @@ import { Separator } from "@/components/ui/separator";
 import { Mail, Calendar, CheckCircle, XCircle, User } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { AppHeader } from "@/components/AppHeader";
+import { NavLink } from "@/components/NavLink";
 
 export default function Profile() {
   const { user, signOut } = useAuth();
@@ -131,7 +132,15 @@ export default function Profile() {
 
       <footer className="border-t mt-20 py-8 bg-card/50 backdrop-blur-sm">
         <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
-          <p>© 2025 FollowUp. Transform your meetings into actionable insights.</p>
+          <p className="flex flex-col items-center justify-center gap-2 sm:flex-row">
+            <span>© 2025 FollowUp. Transform your meetings into actionable insights.</span>
+            <NavLink
+              className="underline underline-offset-4 transition hover:text-foreground"
+              to="/privacypolicy"
+            >
+              Privacy Policy
+            </NavLink>
+          </p>
         </div>
       </footer>
     </div>

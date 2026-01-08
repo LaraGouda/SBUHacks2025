@@ -13,6 +13,7 @@ import Meetings from "./pages/Meetings";
 import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
 import DashboardPage from "./pages/DashboardPage";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
 
 const queryClient = new QueryClient();
 
@@ -55,6 +56,7 @@ const App = () => {
                     </ProtectedRoute>
                   }
                 />
+                <Route path="/privacypolicy" element={<PrivacyPolicy />} />
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />
               </Routes>
