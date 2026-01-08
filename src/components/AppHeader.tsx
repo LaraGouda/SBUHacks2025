@@ -1,9 +1,20 @@
 import { ArrowLeft, History, LayoutDashboard, LogIn, LogOut, User } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 type AppHeaderProps = {
   showBack?: boolean;
@@ -17,6 +28,8 @@ export const AppHeader = ({ showBack, onBack, onDashboard, onSignOut }: AppHeade
   const { toast } = useToast();
   const navigate = useNavigate();
   const isAuthed = Boolean(user);
+  const [authPromptOpen, setAuthPromptOpen] = useState(false);
+  const [authPromptTarget, setAuthPromptTarget] = useState("this section");
 
   const handleBack = () => {
     if (onBack) {
@@ -28,11 +41,8 @@ export const AppHeader = ({ showBack, onBack, onDashboard, onSignOut }: AppHeade
 
   const handleDashboard = () => {
     if (!isAuthed) {
-      toast({
-        title: "Sign in required",
-        description: "Please sign in to access your dashboard.",
-      });
-      navigate("/auth");
+      setAuthPromptTarget("your dashboard");
+      setAuthPromptOpen(true);
       return;
     }
     if (onDashboard) {
@@ -52,6 +62,16 @@ export const AppHeader = ({ showBack, onBack, onDashboard, onSignOut }: AppHeade
       title: "Signed out",
       description: "You've been successfully signed out.",
     });
+    navigate("/");
+  };
+
+  const handleAuthRequired = (target: string) => {
+    setAuthPromptTarget(target);
+    setAuthPromptOpen(true);
+  };
+
+  const handleAuthRedirect = () => {
+    setAuthPromptOpen(false);
     navigate("/auth");
   };
 
@@ -69,26 +89,42 @@ export const AppHeader = ({ showBack, onBack, onDashboard, onSignOut }: AppHeade
               Back to Home
             </Button>
           )}
-          {isAuthed && (
-            <Button type="button" variant="outline" onClick={handleDashboard}>
-              <LayoutDashboard className="w-4 h-4 mr-2" />
-              Dashboard
-            </Button>
-          )}
-          {isAuthed && (
+          <Button type="button" variant="outline" onClick={handleDashboard}>
+            <LayoutDashboard className="w-4 h-4 mr-2" />
+            Dashboard
+          </Button>
+          {isAuthed ? (
             <Button asChild variant="outline">
               <NavLink to="/meetings">
                 <History className="w-4 h-4 mr-2" />
                 History
               </NavLink>
             </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleAuthRequired("your history")}
+            >
+              <History className="w-4 h-4 mr-2" />
+              History
+            </Button>
           )}
-          {isAuthed && (
+          {isAuthed ? (
             <Button asChild variant="outline">
               <NavLink to="/profile">
                 <User className="w-4 h-4 mr-2" />
                 Profile
               </NavLink>
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleAuthRequired("your profile")}
+            >
+              <User className="w-4 h-4 mr-2" />
+              Profile
             </Button>
           )}
           {isAuthed ? (
@@ -106,6 +142,22 @@ export const AppHeader = ({ showBack, onBack, onDashboard, onSignOut }: AppHeade
           )}
         </div>
       </div>
+      <AlertDialog open={authPromptOpen} onOpenChange={setAuthPromptOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Sign in required</AlertDialogTitle>
+            <AlertDialogDescription>
+              Please sign in to access {authPromptTarget}. You can continue as a guest to analyze transcripts.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Not now</AlertDialogCancel>
+            <AlertDialogAction onClick={handleAuthRedirect}>
+              Sign in / Create account
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </header>
   );
 };

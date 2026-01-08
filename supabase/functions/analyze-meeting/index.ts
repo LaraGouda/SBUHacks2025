@@ -717,15 +717,6 @@ serve(async (req) => {
   }
 
   try {
-    // Get authorization header
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: 'Authorization header required' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
     // Initialize Supabase client
     // Try multiple possible secret names for service role key
     const supabaseUrl = Deno.env.get('SUPABASE_URL') || Deno.env.get('PROJECT_URL') || '';
@@ -751,15 +742,17 @@ serve(async (req) => {
       }
     });
 
-    // Verify user session
-    const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
-    
-    if (userError || !user) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid or expired token' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    // Verify user session when a token is provided (guest access is allowed)
+    const authHeader = req.headers.get('Authorization');
+    const token = authHeader?.replace(/^Bearer\s+/i, '').trim();
+    let user: { id: string } | null = null;
+    if (token) {
+      const { data: { user: authedUser }, error: userError } = await supabase.auth.getUser(token);
+      if (userError || !authedUser) {
+        console.warn('Proceeding as guest: auth token could not be verified.');
+      } else {
+        user = authedUser;
+      }
     }
 
     const { transcript, title } = await req.json();
@@ -1025,32 +1018,36 @@ serve(async (req) => {
       }
     }
 
-    // Save analysis results to database using the function
-    const { data: savedMeetingId, error: saveError } = await supabase.rpc('save_meeting_analysis', {
-      p_user_id: user.id,
-      p_title: meetingTitle,
-      p_transcript: transcript,
-      p_summary: summary || null,
-      p_tasks: nextTasks.length > 0 ? nextTasks : null,
-      p_email_subject: email.subject || null,
-      p_email_body: email.body || null,
-      p_calendar_events: calendarEvents.length > 0 ? calendarEvents : null,
-      p_blockers: blockers.length > 0 ? blockers : null,
-      p_raw_analysis: responsePayload || {
-        summary: summaryRaw || summary,
-        nextTasks,
-        email: emailRaw || email,
-        calendar: calendarRaw || calendarEvents,
-        blockers: blockersRaw || blockers,
-      }
-    });
+    // Save analysis results to database when signed in
+    let savedMeetingId: string | null = null;
+    if (user) {
+      const { data: savedId, error: saveError } = await supabase.rpc('save_meeting_analysis', {
+        p_user_id: user.id,
+        p_title: meetingTitle,
+        p_transcript: transcript,
+        p_summary: summary || null,
+        p_tasks: nextTasks.length > 0 ? nextTasks : null,
+        p_email_subject: email.subject || null,
+        p_email_body: email.body || null,
+        p_calendar_events: calendarEvents.length > 0 ? calendarEvents : null,
+        p_blockers: blockers.length > 0 ? blockers : null,
+        p_raw_analysis: responsePayload || {
+          summary: summaryRaw || summary,
+          nextTasks,
+          email: emailRaw || email,
+          calendar: calendarRaw || calendarEvents,
+          blockers: blockersRaw || blockers,
+        }
+      });
 
-    if (saveError) {
-      console.error('Error saving analysis:', saveError);
-      return new Response(
-        JSON.stringify({ error: 'Failed to save analysis results', details: saveError.message }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      if (saveError) {
+        console.error('Error saving analysis:', saveError);
+        return new Response(
+          JSON.stringify({ error: 'Failed to save analysis results', details: saveError.message }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      savedMeetingId = savedId ?? null;
     }
 
     console.log('Analysis complete');
@@ -1126,7 +1123,7 @@ serve(async (req) => {
     };
 
     const responseBody = {
-      meetingId: savedMeetingId,
+      ...(savedMeetingId ? { meetingId: savedMeetingId } : {}),
       ...(responsePayload || fallbackPayload),
     };
 

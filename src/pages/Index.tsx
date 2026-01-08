@@ -54,14 +54,6 @@ const Index = ({ initialView }: IndexProps) => {
   };
 
   const handleGetStarted = () => {
-    if (!isAuthed) {
-      toast({
-        title: "Sign in required",
-        description: "Please sign in to analyze transcripts.",
-      });
-      navigate("/auth");
-      return;
-    }
     setShowInput(true);
   };
 
@@ -73,6 +65,10 @@ const Index = ({ initialView }: IndexProps) => {
     try {
       // Get session token
       const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = {};
+      if (session?.access_token) {
+        headers.Authorization = `Bearer ${session.access_token}`;
+      }
       
       // Call the edge function to analyze the transcript
       const { data, error } = await supabase.functions.invoke('analyze-meeting', {
@@ -80,9 +76,7 @@ const Index = ({ initialView }: IndexProps) => {
           transcript,
           title: `Meeting ${new Date().toLocaleDateString()}`
         },
-        headers: {
-          Authorization: `Bearer ${session?.access_token || ''}`
-        }
+        headers: Object.keys(headers).length > 0 ? headers : undefined
       });
 
       if (error) {
@@ -126,10 +120,12 @@ const Index = ({ initialView }: IndexProps) => {
         }
       }
 
-      // Meeting is automatically saved by the edge function
+      // Meeting is automatically saved by the edge function for signed-in users
       toast({
         title: "Success",
-        description: "Meeting analyzed and saved to history!",
+        description: data?.meetingId
+          ? "Meeting analyzed and saved to history!"
+          : "Meeting analyzed. Sign in to save results to your history.",
       });
     } catch (error: any) {
       console.error('Unexpected error:', error);

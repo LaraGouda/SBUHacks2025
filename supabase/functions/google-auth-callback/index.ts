@@ -121,8 +121,8 @@ serve(async (req) => {
       if (frontendUrl && (frontendUrl.startsWith('http://') || frontendUrl.startsWith('https://'))) {
         redirectUrl = frontendUrl.endsWith('/') ? frontendUrl : `${frontendUrl}/`;
       } else {
-        // Fallback: use localhost for development
-        redirectUrl = 'http://localhost:8080/';
+        // Fallback: use production domain if redirect URL is missing
+        redirectUrl = 'https://followup.codes/';
       }
     }
 
