@@ -773,8 +773,6 @@ serve(async (req) => {
       );
     }
 
-    console.log('Calling NeuralSeek API with transcript length:', transcript.length);
-
     // Meeting title
     const meetingTitle = title || `Meeting ${new Date().toLocaleDateString()}`;
 
@@ -806,8 +804,6 @@ serve(async (req) => {
     }
 
     const bigAgentData = await bigAgentResponse.json();
-    console.log('BigAgent response received');
-
     // Parse the BigAgent response
     let summary = '';
     let summaryRaw: unknown = null;
@@ -872,7 +868,6 @@ serve(async (req) => {
         blockersRaw = parsed.blockers || parsed.issues || parsed.risks || parsed.uncertainties || summaryContainer?.blockers || null;
         blockers = normalizeBlockers(blockersRaw || parsed);
       } else if (typeof answer === 'string') {
-        console.log('BigAgent returned unstructured response, parsing text...');
         const extracted = extractNeuralSeekPayloadFromString(answer);
         const extractedSummary = extracted.summary?.summary || extractSummaryTextFromString(answer);
         summary = extractedSummary || stripMarkdown(answer);
@@ -942,8 +937,6 @@ serve(async (req) => {
     const needsBlockers = blockers.length === 0;
 
     if (needsSummary || needsTasks || needsEmail || needsCalendar || needsBlockers) {
-      console.log('Calling individual NeuralSeek agents...');
-
       const requests: Array<Promise<Response> | null> = [
         needsSummary ? fetch('https://stagingapi.neuralseek.com/v1/stony52/maistro', {
           method: 'POST',
@@ -1049,8 +1042,6 @@ serve(async (req) => {
       }
       savedMeetingId = savedId ?? null;
     }
-
-    console.log('Analysis complete');
 
     let summaryPayload: unknown = summaryRaw || summary;
     let nextTasksPayload: unknown = nextTasks;

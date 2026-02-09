@@ -14,6 +14,7 @@ import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
 import DashboardPage from "./pages/DashboardPage";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
+import ProjectUpdates from "./pages/ProjectUpdates";
 
 const queryClient = new QueryClient();
 
@@ -57,6 +58,7 @@ const App = () => {
                   }
                 />
                 <Route path="/privacypolicy" element={<PrivacyPolicy />} />
+                <Route path="/picture-walkthrough" element={<ProjectUpdates />} />
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />
               </Routes>

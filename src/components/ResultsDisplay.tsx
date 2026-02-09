@@ -559,8 +559,6 @@ export const ResultsDisplay = ({
       const toHeader = validRecipients.join(', ');
       const shouldCreateDraft = validRecipients.length > 0;
 
-      console.log('Sending email with:', { recipients, subject: emailSubject, bodyLength: emailBody.length });
-
       if (shouldCreateDraft) {
         // Use direct fetch to the Supabase Functions endpoint so we can
         // inspect raw status and body. This avoids generic client-side
@@ -591,8 +589,6 @@ export const ResultsDisplay = ({
         } catch (err) {
           respBody = { raw: await resp.text() };
         }
-
-        console.log('send-gmail response status:', resp.status, respBody);
 
         if (!resp.ok) {
           const message = respBody?.error || respBody?.message || `Edge function returned status ${resp.status}`;
@@ -1538,7 +1534,7 @@ export const ResultsDisplay = ({
                   <>
                     <div className="prose prose-sm max-w-none bg-muted/50 p-4 rounded-lg border">
                       {(() => {
-                        let content = section.content;
+                        const content = section.content;
                         let contentStr = typeof content === 'string' ? content : String(content);
                         
                         // Strip markdown code blocks first

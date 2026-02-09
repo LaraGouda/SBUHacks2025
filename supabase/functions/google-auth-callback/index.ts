@@ -59,7 +59,6 @@ serve(async (req) => {
       throw new Error('Invalid Supabase URL configuration');
     }
     
-    console.log('Using Supabase URL:', supabaseUrl);
     const redirectUri = `${supabaseUrl}/functions/v1/google-auth-callback`;
 
     if (!clientId || !clientSecret) {
@@ -172,7 +171,7 @@ serve(async (req) => {
               userId = existingUser.id;
               
               // Update user metadata to include Google info if not already present
-              const updateUserResponse = await fetch(`${supabaseUrl}/auth/v1/admin/users/${userId}`, {
+              await fetch(`${supabaseUrl}/auth/v1/admin/users/${userId}`, {
                 method: 'PUT',
                 headers: {
                   'apikey': serviceRoleKey,
@@ -193,10 +192,6 @@ serve(async (req) => {
                 })
               });
 
-              if (updateUserResponse.ok) {
-                console.log('Updated existing user with Google info');
-              }
-              
               // Create session for existing user using Supabase Admin API
               // Try using the Supabase client's admin methods first
               try {
@@ -214,9 +209,6 @@ serve(async (req) => {
                 // The generateLink doesn't create a session directly, so we need to use the token
                 // Instead, let's try the direct API endpoint with the correct format
                 const sessionEndpoint = `${supabaseUrl}/auth/v1/admin/users/${userId}/sessions`;
-                console.log('Creating session at:', sessionEndpoint);
-                console.log('Using service role key (first 20 chars):', serviceRoleKey.substring(0, 20));
-                
                 const sessionResponse = await fetch(sessionEndpoint, {
                   method: 'POST',
                   headers: {
@@ -231,12 +223,6 @@ serve(async (req) => {
 
                 if (sessionResponse.ok) {
                   supabaseSession = await sessionResponse.json();
-                  console.log('Created session for existing user:', {
-                    hasAccessToken: !!supabaseSession?.access_token,
-                    hasRefreshToken: !!supabaseSession?.refresh_token,
-                    userId: supabaseSession?.user?.id,
-                    sessionKeys: Object.keys(supabaseSession || {})
-                  });
                 } else {
                   const errorText = await sessionResponse.text();
                   let errorData;
@@ -288,8 +274,6 @@ serve(async (req) => {
                 
                 // Create session for new user
                 const sessionEndpoint = `${supabaseUrl}/auth/v1/admin/users/${userId}/sessions`;
-                console.log('Creating session for new user at:', sessionEndpoint);
-                
                 const sessionResponse = await fetch(sessionEndpoint, {
                   method: 'POST',
                   headers: {
@@ -304,12 +288,6 @@ serve(async (req) => {
 
                 if (sessionResponse.ok) {
                   supabaseSession = await sessionResponse.json();
-                  console.log('Created new user and session:', {
-                    hasAccessToken: !!supabaseSession?.access_token,
-                    hasRefreshToken: !!supabaseSession?.refresh_token,
-                    userId: supabaseSession?.user?.id,
-                    sessionKeys: Object.keys(supabaseSession || {})
-                  });
                 } else {
                   const errorText = await sessionResponse.text();
                   let errorData;
@@ -350,8 +328,6 @@ serve(async (req) => {
 
               if (tokenError) {
                 console.error('Error storing OAuth token:', tokenError);
-              } else {
-                console.log('OAuth token stored successfully');
               }
             }
             } else {
@@ -389,7 +365,6 @@ serve(async (req) => {
         const supabaseAccessToken = encodeURIComponent(accessToken);
         const supabaseRefreshToken = refreshToken ? encodeURIComponent(refreshToken) : '';
         sessionParams = `&supabase_access_token=${supabaseAccessToken}${supabaseRefreshToken ? `&supabase_refresh_token=${supabaseRefreshToken}` : ''}`;
-        console.log('Including Supabase session in redirect');
       } else {
         console.error('Supabase session missing access_token:', JSON.stringify(supabaseSession).substring(0, 200));
       }

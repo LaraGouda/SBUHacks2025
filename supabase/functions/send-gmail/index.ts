@@ -13,15 +13,7 @@ serve(async (req) => {
   }
 
   try {
-    console.log('send-gmail function called (saving to drafts)');
     const { accessToken, to, subject, body } = await req.json();
-    
-    console.log('Received request:', { 
-      hasAccessToken: !!accessToken, 
-      to, 
-      subject, 
-      bodyLength: body?.length 
-    });
 
     if (!accessToken || !to || !subject || !body) {
       const missingFields = [];

@@ -209,7 +209,7 @@ const parseSummary = (value: any): SummaryData => {
         }
         if (summaryObj.meeting_summary) {
           const innerSummary = summaryObj.meeting_summary;
-          let summaryText = innerSummary.summary || innerSummary.text || '';
+          const summaryText = innerSummary.summary || innerSummary.text || '';
           const bullets: string[] = [];
           
           // Include decisions if present
@@ -244,7 +244,7 @@ const parseSummary = (value: any): SummaryData => {
   }
   
   if (typeof value === 'string') {
-    let trimmed = value.trim();
+    const trimmed = value.trim();
     
     const parsedJson = tryParseJson(trimmed);
     if (parsedJson) {
@@ -310,7 +310,7 @@ const parseTasks = (value: any): TaskItem[] => {
   
   // If it's a string, try to parse it
   if (typeof value === 'string') {
-    let valueStr = value.trim();
+    const valueStr = value.trim();
     
     const parsedJson = tryParseJson(valueStr);
     if (parsedJson) {
@@ -481,7 +481,7 @@ const parseBlockers = (value: any): BlockerItem[] => {
   
   // If it's a string, try to parse it
   if (typeof value === 'string') {
-    let valueStr = value.trim();
+    const valueStr = value.trim();
     
     const parsedJson = tryParseJson(valueStr);
     if (parsedJson) {
@@ -567,7 +567,7 @@ const parseCalendarEvents = (value: any): CalendarEvent[] => {
 
   // If value is a string with markdown code blocks, parse it
   if (typeof value === 'string') {
-    let valueStr = value.trim();
+    const valueStr = value.trim();
     
     const parsedJson = tryParseJson(valueStr);
     if (parsedJson) {
@@ -622,7 +622,7 @@ const parseCalendarEvents = (value: any): CalendarEvent[] => {
   
   // If it's a string, try to parse it
   if (typeof value === 'string') {
-    let valueStr = value.trim();
+    const valueStr = value.trim();
     
     const parsedJson = tryParseJson(valueStr);
     if (parsedJson) {
@@ -779,7 +779,7 @@ const parseEmails = (value: any, depth = 0): EmailData[] => {
   
   // If it's a string, try to parse it
   if (typeof value === 'string') {
-    let valueStr = value.trim();
+    const valueStr = value.trim();
     
     const parsedJson = tryParseJson(valueStr);
     if (parsedJson) {

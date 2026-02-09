@@ -38,11 +38,6 @@ export default function Auth() {
     setError("");
     
     try {
-      // Debug: Log Supabase configuration
-      console.log('Supabase URL:', import.meta.env.VITE_SUPABASE_URL);
-      console.log('Supabase Key exists:', !!import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY);
-      console.log('Supabase Key prefix:', import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.substring(0, 20) + '...');
-      
       // Use Supabase's built-in Google OAuth
       const redirectUrl = `${window.location.origin}/`;
       
@@ -80,7 +75,6 @@ export default function Auth() {
       // Don't set loading to false here as the user will be redirected
     } catch (err: any) {
       console.error('Google sign-in error:', err);
-      console.error('Error details:', JSON.stringify(err, null, 2));
       
       let errorMsg = err.message || "Failed to sign in with Google. Please try again.";
       

@@ -99,11 +99,6 @@ serve(async (req) => {
         `prompt=consent` +
         stateParam;
 
-      console.log('Generated OAuth URL:', authUrl);
-      console.log('Redirect URI:', redirectUri);
-      console.log('Client ID:', clientId?.substring(0, 20) + '...');
-      console.log('Full Client ID length:', clientId?.length);
-
       return new Response(
         JSON.stringify({ 
           authUrl, 
